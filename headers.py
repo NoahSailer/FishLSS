@@ -10,6 +10,8 @@ from timeit import timeit
 from time import time
 from copy import copy
 from classy import Class
+from experiment import *
+from fisherForecast import *
 import sys
 
 ##################################################################################
