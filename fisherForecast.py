@@ -38,6 +38,7 @@ class fisherForecast(object):
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, params):
       self.experiment = experiment
       self.cosmo = cosmo
+      self.params = params
       k = np.logspace(np.log10(self.kmin),np.log10(self.kmax),self.Nk)
       dk = list(k[1:]-k[:-1])
       dk.append(dk[-1])
@@ -50,19 +51,18 @@ class fisherForecast(object):
       self.dk = np.repeat(dk,self.Nmu)
       self.mu = np.tile(mu,self.Nk)
       self.dmu = np.tile(dmu,self.Nk)
-      self.P_fid = compute_galaxy_power_spectrum(experiment, cosmo)(self.k,self.mu)
+      self.P_fid = compute_tracer_power_spectrum(self)(self.k,self.mu)
       self.Vsurvey = self.comoving_survey_volume()
-      self.params = params
 
 
    def comoving_survey_volume(self):
       zmin,zmax = self.experiment.zmin,self.experiment.zmax
-      vsmall = (4*np.pi/3) * self.cosmo.angular_distance(zmin)**3.
-      vbig = (4*np.pi/3) * self.cosmo.angular_distance(zmax)**3.
+      vsmall = (4*np.pi/3) * ((1.+zmin)*self.cosmo.angular_distance(zmin))**3.
+      vbig = (4*np.pi/3) * ((1.+zmax)*self.cosmo.angular_distance(zmax))**3.
       return self.experiment.fsky*(vbig - vsmall)
 
 
-   def compute_dPdp(self, param, relative_step=0.01, one_sided=False, five_point=False, analytical=True):
+   def compute_dPdp(self, param, relative_step=0.01, one_sided=False, five_point=False, analytical=True, Noise=False):
       '''
       Calculates the derivative of the galaxy power spectrum
       with respect to the input parameter around the fidicual
@@ -81,35 +81,35 @@ class fisherForecast(object):
       if one_sided:
          self.cosmo.set({param : default_value * (1. + relative_step)})
          self.cosmo.compute()
-         P_dummy_hi = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. + 2.*relative_step)})
          self.cosmo.compute()
-         P_dummy_higher = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self)(self.k,self.mu)
          self.cosmo.set({param : default_value})
          return (self.P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * default_value * relative_step)
 
       if five_point:
          self.cosmo.set({param : default_value * (1. + relative_step)})
          self.cosmo.compute()
-         P_dummy_hi = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. + 2.*relative_step)})
          self.cosmo.compute()
-         P_dummy_higher = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. - relative_step)})
          self.cosmo.compute()
-         P_dummy_low = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+         P_dummy_low = compute_tracer_power_spectrum(self)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. - 2.*relative_step)})
          self.cosmo.compute()
-         P_dummy_lower = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+         P_dummy_lower = compute_tracer_power_spectrum(self)(self.k,self.mu)
          self.cosmo.set({param : default_value})
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * default_value * relative_step)
 
       self.cosmo.set({param : default_value * (1. + relative_step)})
       self.cosmo.compute()
-      P_dummy_hi = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+      P_dummy_hi = compute_tracer_power_spectrum(self)(self.k,self.mu)
       self.cosmo.set({param : default_value * (1. - relative_step)})
       self.cosmo.compute()
-      P_dummy_low = compute_galaxy_power_spectrum(self.experiment, self.cosmo)(self.k,self.mu)
+      P_dummy_low = compute_tracer_power_spectrum(self)(self.k,self.mu)
       self.cosmo.set({param : default_value})
       return (P_dummy_hi - P_dummy_low) / (2. * default_value * relative_step)      
 
