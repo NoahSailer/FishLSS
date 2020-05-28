@@ -10,18 +10,18 @@ class fisherForecast(object):
    Fisher matrix for an arbitrary number of parameters.
    '''
 
-   def __init__(self, kmin=1e-4, kmax=0.25, cosmo=None, experiment=None, Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h'])):
+   def __init__(self, khmin=1e-4, khmax=0.25, cosmo=None, experiment=None, Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h'])):
       '''
       '''
-      self.kmin = kmin
-      self.kmax = kmax
+      self.khmin = khmin
+      self.khmax = khmax
       self.Nmu = Nmu
       self.Nk = Nk
       self.marg_params = marg_params
 
       self.experiment = None
       self.cosmo = None
-      self.k = None
+      self.k = None  # [h/Mpc]
       self.dk = None
       self.mu = None
       self.dmu = None
@@ -39,7 +39,7 @@ class fisherForecast(object):
       self.experiment = experiment
       self.cosmo = cosmo
       self.params = params
-      k = np.logspace(np.log10(self.kmin),np.log10(self.kmax),self.Nk)
+      k = np.logspace(np.log10(self.khmin),np.log10(self.khmax),self.Nk)
       dk = list(k[1:]-k[:-1])
       dk.append(dk[-1])
       dk = np.array(dk)
@@ -56,10 +56,14 @@ class fisherForecast(object):
 
 
    def comoving_survey_volume(self):
+      '''
+      Returns the comoving volume in Mpc^3/h^3 assuming
+      that the universe is flat.
+      '''
       zmin,zmax = self.experiment.zmin,self.experiment.zmax
       vsmall = (4*np.pi/3) * ((1.+zmin)*self.cosmo.angular_distance(zmin))**3.
       vbig = (4*np.pi/3) * ((1.+zmax)*self.cosmo.angular_distance(zmax))**3.
-      return self.experiment.fsky*(vbig - vsmall)
+      return self.experiment.fsky*(vbig - vsmall)*self.params['h']**3.
 
 
    def compute_dPdp(self, param, relative_step=0.01, one_sided=False, five_point=False, analytical=True, Noise=False):
@@ -75,7 +79,7 @@ class fisherForecast(object):
       default_value = self.params[param]
 
       if analytical:
-         if param == 'n_s': return self.P_fid * np.log(self.k/0.05)
+         if param == 'n_s': return self.P_fid * np.log(self.k*self.params['h']/0.05)
          if param == 'A_s': return self.P_fid / self.params['A_s']
 
       if one_sided:
@@ -161,5 +165,5 @@ class fisherForecast(object):
       plt.semilogx(pretty_k, pretty_p, c=c)
       plt.xlabel(xlabel)
       plt.ylabel(ylabel)
-      plt.xlim(self.kmin,self.kmax)
+      plt.xlim(self.khmin,self.khmax)
       plt.show()

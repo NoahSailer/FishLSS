@@ -36,7 +36,7 @@ def Muv(fishcast):
    Equation 2.6 of Wilson and White 2019.
    '''
    z = fishcast.experiment.zmid
-   result = muv(z) - 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*100000.)
+   result = muv(z) - 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*1.e5)
    result += 2.5 * np.log10(1.+z)
    return result
 
@@ -44,10 +44,10 @@ def Muv(fishcast):
 def n(fishcast):
    '''
    Equation 2.5 of Wilson and White 2019. Return number
-   density of LBGs at redshift z in units of Mpc^3.
+   density of LBGs at redshift z in units of Mpc^3/h^3.
    '''
    z = fishcast.experiment.zmid
-   result = (np.log(10.)/2.5) * phi(z) * fishcast.params['h']**3.
+   result = (np.log(10.)/2.5) * phi(z)
    result *= 10.**( -0.4 * (1.+alpha(z)) * (Muv(fishcast)-Muvstar(z)) )
    result *= np.exp(-10.**(-0.4 * (Muv(fishcast)-Muvstar(z)) ) )
    return result
