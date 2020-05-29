@@ -25,8 +25,8 @@ class fisherForecast(object):
       self.dk = None
       self.mu = None
       self.dmu = None
-      self.P_fid = None
-      self.Vsurvey = None
+      self.P_fid = None     # fidicual power spectra at the center of each redshift bin
+      self.Vsurvey = None   # comoving volume [Mpc/h]^3 in each redshift bin
       self.params = None
 
       if (cosmo is None) or (experiment is None):
@@ -51,98 +51,108 @@ class fisherForecast(object):
       self.dk = np.repeat(dk,self.Nmu)
       self.mu = np.tile(mu,self.Nk)
       self.dmu = np.tile(dmu,self.Nk)
-      self.P_fid = compute_tracer_power_spectrum(self)(self.k,self.mu)
-      self.Vsurvey = self.comoving_survey_volume()
+      self.P_fid = np.array([compute_tracer_power_spectrum(self,z)(self.k,self.mu) for z in experiment.zcenters])
+      self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) for i in range(len(experiment.zedges)-1)])
 
 
-   def comoving_survey_volume(self):
+   def comov_vol(self,zmin,zmax):
       '''
-      Returns the comoving volume in Mpc^3/h^3 assuming
-      that the universe is flat.
+      Returns the comoving volume in Mpc^3/h^3 between 
+      zmin and zmax assuming that the universe is flat.
       '''
-      zmin,zmax = self.experiment.zmin,self.experiment.zmax
       vsmall = (4*np.pi/3) * ((1.+zmin)*self.cosmo.angular_distance(zmin))**3.
       vbig = (4*np.pi/3) * ((1.+zmax)*self.cosmo.angular_distance(zmax))**3.
       return self.experiment.fsky*(vbig - vsmall)*self.params['h']**3.
 
 
-   def compute_dPdp(self, param, relative_step=0.01, one_sided=False, five_point=False, analytical=True, Noise=False):
+   def compute_dPdp(self, param, z, relative_step=0.01, one_sided=False, five_point=False, analytical=True, Noise=False):
       '''
       Calculates the derivative of the galaxy power spectrum
       with respect to the input parameter around the fidicual
-      cosmology and redshift. Returns a an array of length
-      Nk*Nmu.
+      cosmology and redshift (for the respective bin). Returns
+      an array of length Nk*Nmu.
 
       To make the derivatives ~2 times faster, I don't 
       recompute the cosmology after taking the derivative.
       '''
       default_value = self.params[param]
-
+      
       if analytical:
-         if param == 'n_s': return self.P_fid * np.log(self.k*self.params['h']/0.05)
-         if param == 'A_s': return self.P_fid / self.params['A_s']
+         P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         if param == 'n_s': return P_fid * np.log(self.k*self.params['h']/0.05)
+         if param == 'A_s': return P_fid / self.params['A_s']
 
       if one_sided:
+         self.cosmo.compute()
+         P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. + relative_step)})
          self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(self)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. + 2.*relative_step)})
          self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(self)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value})
-         return (self.P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * default_value * relative_step)
+         return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * default_value * relative_step)
 
       if five_point:
          self.cosmo.set({param : default_value * (1. + relative_step)})
          self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(self)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. + 2.*relative_step)})
          self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(self)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. - relative_step)})
          self.cosmo.compute()
-         P_dummy_low = compute_tracer_power_spectrum(self)(self.k,self.mu)
+         P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value * (1. - 2.*relative_step)})
          self.cosmo.compute()
-         P_dummy_lower = compute_tracer_power_spectrum(self)(self.k,self.mu)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          self.cosmo.set({param : default_value})
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * default_value * relative_step)
 
       self.cosmo.set({param : default_value * (1. + relative_step)})
       self.cosmo.compute()
-      P_dummy_hi = compute_tracer_power_spectrum(self)(self.k,self.mu)
+      P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
       self.cosmo.set({param : default_value * (1. - relative_step)})
       self.cosmo.compute()
-      P_dummy_low = compute_tracer_power_spectrum(self)(self.k,self.mu)
+      P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
       self.cosmo.set({param : default_value})
       return (P_dummy_hi - P_dummy_low) / (2. * default_value * relative_step)      
 
 
-   def compute_dPdvecp(self, relative_step=0.01):
+   def compute_dPdvecp(self, z, relative_step=0.01):
       '''
       Calculates the derivatives of the galaxy power spectrum
       with respect to all the parameters that are being 
       margenalized over. Returns an array with dimensions (n, Nk*Nmu), 
       where n is the number of marginalized parameters.
       '''
-      result = np.array([self.compute_dPdp(param=marg_param) for marg_param in self.marg_params]) 
+      result = np.array([self.compute_dPdp(param=marg_param, z=z) for marg_param in self.marg_params]) 
       self.cosmo.compute()
       return result
 
 
-   def get_covariance_matrix(self): return compute_covariance_matrix(self)
+   def get_covariance_matrix(self, zbin_index): return compute_covariance_matrix(self,zbin_index)
 
 
-   def compute_Fisher_matrix(self):
+   def compute_Fisher_matrix_for_specific_zbin(self, zbin_index):
+      z = self.experiment.zcenters[zbin_index]
       n = len(self.marg_params)
       F = np.ones((n,n))
-      C = self.get_covariance_matrix()
+      C = self.get_covariance_matrix(zbin_index)
       # Since the matrix is diagonal, inverting it is trivial
       Cinv = np.diag(1./np.diag(C))
-      dPdvecp = self.compute_dPdvecp()
+      dPdvecp = self.compute_dPdvecp(z)
       for i in range(n):
          for j in range(n):
             F[i,j] = np.dot(dPdvecp[i],np.dot(Cinv,dPdvecp[j]))
+      return F
+
+
+   def compute_Fisher_matrix(self):
+      F = self.compute_Fisher_matrix_for_specific_zbin(0)
+      for i in range(1,len(self.experiment.zedges)-1):
+         F += self.compute_Fisher_matrix_for_specific_zbin(i)
       return F
 
 

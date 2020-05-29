@@ -15,39 +15,37 @@ muv = np.array([24.2,24.7,25.4,25.5,25.8])
 muv = interp1d(zs, muv, kind='linear', bounds_error=False, fill_value=0.)
 
 
-def compute_covariance_matrix(fishcast):
+def compute_covariance_matrix(fishcast, zbin_index):
    '''
    Returns a square array of linear dimension Nk*Nmu. 
    '''
-   z = fishcast.experiment.zmid
-   prefactor = (4.*np.pi**2.) / (fishcast.dk*fishcast.dmu*fishcast.Vsurvey*fishcast.k**2.)
+   z = fishcast.experiment.zcenters[zbin_index]
+   prefactor = (4.*np.pi**2.) / (fishcast.dk*fishcast.dmu*fishcast.Vsurvey[zbin_index]*fishcast.k**2.)
    if fishcast.experiment.HI: 
       pn = compute_tracer_power_spectrum(fishcast, z)(fishcast.k,fishcast.mu)
       diagonal_values = prefactor * pn**2.
       return np.diag(diagonal_values)
-   if fishcast.experiment.LBG: number_density = n(fishcast)
-   else: number_density = fishcast.experiment.n
-   diagonal_values = prefactor * (fishcast.P_fid + 1./number_density)**2.
+   if fishcast.experiment.LBG: number_density = n(fishcast, z)
+   else: number_density = fishcast.experiment.n[zbin_index]
+   diagonal_values = prefactor * (fishcast.P_fid[zbin_index] + 1./number_density)**2.
    return np.diag(diagonal_values)
 
 
-def Muv(fishcast):
+def Muv(fishcast, z):
    '''
    Equation 2.6 of Wilson and White 2019.
    '''
-   z = fishcast.experiment.zmid
    result = muv(z) - 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*1.e5)
    result += 2.5 * np.log10(1.+z)
    return result
 
 
-def n(fishcast):
+def n(fishcast, z):
    '''
    Equation 2.5 of Wilson and White 2019. Return number
    density of LBGs at redshift z in units of Mpc^3/h^3.
    '''
-   z = fishcast.experiment.zmid
    result = (np.log(10.)/2.5) * phi(z)
-   result *= 10.**( -0.4 * (1.+alpha(z)) * (Muv(fishcast)-Muvstar(z)) )
-   result *= np.exp(-10.**(-0.4 * (Muv(fishcast)-Muvstar(z)) ) )
+   result *= 10.**( -0.4 * (1.+alpha(z)) * (Muv(fishcast,z)-Muvstar(z)) )
+   result *= np.exp(-10.**(-0.4 * (Muv(fishcast,z)-Muvstar(z)) ) )
    return result
