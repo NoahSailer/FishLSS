@@ -75,48 +75,66 @@ class fisherForecast(object):
       To make the derivatives ~2 times faster, I don't 
       recompute the cosmology after taking the derivative.
       '''
-      default_value = self.params[param]
       
       if analytical:
+         # for derivatives whose quantities are CLASS inputs, but can be computed analytically
          P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         if param == 'n_s': return P_fid * np.log(self.k*self.params['h']/0.05)
+         if param == 'n_s': return P_fid * np.log(self.k/(self.params['h']*0.05))
          if param == 'A_s': return P_fid / self.params['A_s']
+      
+      # derivatives that aren't class inputs that can be computed analytically
+      if param == 'log(A_s)' : return P_fid
+      if param == 'b' : 
+         pmatter = compute_matter_power_spectrum(self, z)(self.k)
+         Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h']
+         sigma_parallel = (3.e5)*(1.+z)*self.experiment.sigma_z/Hz
+         f = compute_f(self, z)(self.k)
+         b = 1.5 #this is pretty hacky, have an option to store a custom bias
+         return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
+      if param == 'N' : return np.ones(len(self.k))
+    
+      default_value = self.params[param]
+        
+      def set_param(value):
+         self.cosmo.set({param : value})
+         self.params[param] = value
 
+      # code for numerical differentiation
       if one_sided:
          self.cosmo.compute()
          P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value * (1. + relative_step)})
+         set_param(default_value * (1. + relative_step))
          self.cosmo.compute()
          P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value * (1. + 2.*relative_step)})
+         set_param(default_value * (1. + 2.*relative_step))
          self.cosmo.compute()
          P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value})
+         set_param(default_value)
          return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * default_value * relative_step)
 
       if five_point:
-         self.cosmo.set({param : default_value * (1. + relative_step)})
+         set_param(default_value * (1. + relative_step))
          self.cosmo.compute()
          P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value * (1. + 2.*relative_step)})
+         set_param(default_value * (1. + 2.*relative_step))
          self.cosmo.compute()
          P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value * (1. - relative_step)})
+         set_param(default_value * (1. - relative_step))
          self.cosmo.compute()
          P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value * (1. - 2.*relative_step)})
+         set_param(default_value * (1. - 2.*relative_step))
          self.cosmo.compute()
          P_dummy_lower = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-         self.cosmo.set({param : default_value})
+         set_param(default_value)
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * default_value * relative_step)
 
-      self.cosmo.set({param : default_value * (1. + relative_step)})
+      set_param(default_value * (1. + relative_step))
       self.cosmo.compute()
       P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-      self.cosmo.set({param : default_value * (1. - relative_step)})
+      set_param(default_value * (1. - relative_step))
       self.cosmo.compute()
       P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
-      self.cosmo.set({param : default_value})
+      set_param(default_value)
       return (P_dummy_hi - P_dummy_low) / (2. * default_value * relative_step)      
 
 
@@ -169,11 +187,15 @@ class fisherForecast(object):
          print('Relative error on '+marg_param+':',marg_errors[i]/self.params[marg_param])
 
 
-   def pretty_plot(self,k,p,xlabel=None,ylabel=None,c='k'):
+   def pretty_plot(self,k,curves,xlabel=None,ylabel=None,c=None,datalabels=None,legendtitle=None,filename=None):
       pretty_k = [ k[i] for i in (self.Nmu*np.linspace(0,self.Nk-1,self.Nk)).astype(int) ]
-      pretty_p = [ p[i] for i in (self.Nmu*np.linspace(0,self.Nk-1,self.Nk)).astype(int) ]
-      plt.semilogx(pretty_k, pretty_p, c=c)
+      for i in range(len(curves)):
+         curve = curves[i]
+         pretty_p = [ curve[j] for j in (self.Nmu*np.linspace(0,self.Nk-1,self.Nk)).astype(int) ]
+         plt.semilogx(pretty_k, pretty_p, c=c[i],label=datalabels[i])
       plt.xlabel(xlabel)
       plt.ylabel(ylabel)
+      plt.legend(loc=0,title=legendtitle)
       plt.xlim(self.khmin,self.khmax)
+      if filename is not None: plt.savefig(filename+'.pdf')
       plt.show()

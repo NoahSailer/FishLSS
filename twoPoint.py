@@ -1,7 +1,7 @@
 from headers import *
 from castorina import castorinaBias,castorinaPn
 
-def compute_matter_power_spectrum(fishcast, z):
+def compute_matter_power_spectrum(fishcast, z, linear=False):
    '''
    Computes the matter power spectrum for a given cosmology
    at redshift z. Assumes that cosmo.comute() has already been called.
@@ -9,7 +9,10 @@ def compute_matter_power_spectrum(fishcast, z):
    '''
    experiment,cosmo = fishcast.experiment,fishcast.cosmo
    kk = np.logspace(-4.0,1.0,200)
-   pkcb = np.array([cosmo.pk_cb(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   if linear:
+      pkcb = np.array([cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   else:
+      pkcb = np.array([cosmo.pk(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
    p = interp1d(kk, pkcb, kind='linear', bounds_error=False, fill_value=0.)
    return p
 
@@ -57,7 +60,7 @@ def PNoise(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6, skycoupling=0.9
    I divide by Tb (equation B1) to convert to Mpc^3/h^3.
    Returns a function of k and mu.
    '''
-   Hz = fishcast.cosmo.Hubble(z)*(3.086e5) #check this conversion, should be in (km/s/Mpc)
+   Hz = fishcast.cosmo.Hubble(z)*(299792.458)
    Ez = fishcast.cosmo.Hubble(z)/fishcast.cosmo.Hubble(0)
    lam = 0.21 * (1+z)
    r = (1.+z) * fishcast.cosmo.angular_distance(z)
@@ -85,7 +88,15 @@ def PNoise(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6, skycoupling=0.9
 def HIb(z): return castorinaBias(z)
 
 
-def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True):
+def compute_f(fishcast, z, step=0.01):
+   p_hi = compute_matter_power_spectrum(fishcast,z=z+step)
+   p_higher = compute_matter_power_spectrum(fishcast,z=z+2.*step)
+   p_fid = compute_matter_power_spectrum(fishcast,z=z)
+   dPdz = lambda k: (p_fid(k) - (4./3.) * p_hi(k) + (1./3.) * p_higher(k)) / ((-2./3.)*step)
+   return lambda k: -(1.+z) * dPdz(k) / (2. * p_fid(k))
+
+
+def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True, b=1.5):
    '''
    Computes the power spectrum of the matter tracer assuming a linear
    bias parameter b. Returns a function of k [h/Mpc] and mu. For HI surverys
@@ -97,33 +108,23 @@ def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True
 
    if experiment.LBG: b = LBGb(z)
    elif experiment.HI: b = HIb(z)
-   else: b = 0.9
-
-   def compute_f(z, relative_step=0.01):
-      p_hi = compute_matter_power_spectrum(fishcast,z=z*(1.+relative_step))
-      p_low = compute_matter_power_spectrum(fishcast,z=z*(1.-relative_step))
-      p_fid = compute_matter_power_spectrum(fishcast,z=z)
-      dPdz = lambda k: (p_hi(k) - p_low(k)) / (z*2.*relative_step)
-      return lambda k: -(1.+z) * dPdz(k) / (2. * p_fid(k))
 
    if RSD and Zerror: 
-      f = compute_f(z)
-      # convert to h km/(s Mpc), this conversion might be slightly off, double check it.
-      Hz = cosmo.Hubble(z)*(3.086e5)/fishcast.params['h']
+      f = compute_f(fishcast, z)
+      Hz = cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
       p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b+f(k)*mu**2.)**2.
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
       return p
 
    elif RSD and not Zerror: 
-      f = compute_f(z)
+      f = compute_f(fishcast, z)
       p = lambda k,mu: pmatter(k) * (b+f(k)*mu**2.)**2.
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
       return p
 
    elif not RSD and Zerror: 
-      # convert to km/(s Mpc), this conversion might be slightly off, double check it.
-      Hz = cosmo.Hubble(z)*(3.086e5)
+      Hz = cosmo.Hubble(z)*(299792.458)
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
       p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b**2.)
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)

@@ -15,6 +15,6 @@ class experiment(object):
       self.zcenters = (self.zedges[1:]+self.zedges[:-1])/2.
       self.fsky = fsky
       self.sigma_z = sigma_z
-      self.n = n*np.ones(nbins)
+      self.n = n*np.ones(nbins) #add option to set n to be an array
       self.LBG = LBG
       self.HI = HI
