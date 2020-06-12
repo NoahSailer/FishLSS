@@ -75,10 +75,11 @@ class fisherForecast(object):
       To make the derivatives ~2 times faster, I don't 
       recompute the cosmology after taking the derivative.
       '''
-      
+    
+      P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+        
       if analytical:
          # for derivatives whose quantities are CLASS inputs, but can be computed analytically
-         P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          if param == 'n_s': return P_fid * np.log(self.k/(self.params['h']*0.05))
          if param == 'A_s': return P_fid / self.params['A_s']
       
@@ -89,9 +90,9 @@ class fisherForecast(object):
          Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h']
          sigma_parallel = (3.e5)*(1.+z)*self.experiment.sigma_z/Hz
          f = compute_f(self, z)(self.k)
-         b = 1.5 #this is pretty hacky, have an option to store a custom bias
+         b = self.experiment.b(z) 
          return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
-      if param == 'N' : return np.ones(len(self.k))
+      if param == 'N' : return np.ones(len(self.k))/2. #I don't know why the 2 would be there
     
       default_value = self.params[param]
         
@@ -110,6 +111,7 @@ class fisherForecast(object):
          self.cosmo.compute()
          P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          set_param(default_value)
+         self.cosmo.compute()
          return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * default_value * relative_step)
 
       if five_point:
@@ -126,6 +128,7 @@ class fisherForecast(object):
          self.cosmo.compute()
          P_dummy_lower = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          set_param(default_value)
+         self.cosmo.compute()
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * default_value * relative_step)
 
       set_param(default_value * (1. + relative_step))
@@ -135,17 +138,18 @@ class fisherForecast(object):
       self.cosmo.compute()
       P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
       set_param(default_value)
+      self.cosmo.compute()
       return (P_dummy_hi - P_dummy_low) / (2. * default_value * relative_step)      
 
 
-   def compute_dPdvecp(self, z, relative_step=0.01):
+   def compute_dPdvecp(self, z, relative_step=0.01, five_point=False):
       '''
       Calculates the derivatives of the galaxy power spectrum
       with respect to all the parameters that are being 
       margenalized over. Returns an array with dimensions (n, Nk*Nmu), 
       where n is the number of marginalized parameters.
       '''
-      result = np.array([self.compute_dPdp(param=marg_param, z=z) for marg_param in self.marg_params]) 
+      result = np.array([self.compute_dPdp(param=marg_param, z=z, five_point=five_point) for marg_param in self.marg_params]) 
       self.cosmo.compute()
       return result
 
@@ -153,22 +157,22 @@ class fisherForecast(object):
    def get_covariance_matrix(self, zbin_index): return compute_covariance_matrix(self,zbin_index)
 
 
-   def compute_Fisher_matrix_for_specific_zbin(self, zbin_index):
+   def compute_Fisher_matrix_for_specific_zbin(self, zbin_index, five_point=False):
       z = self.experiment.zcenters[zbin_index]
       n = len(self.marg_params)
       F = np.ones((n,n))
       C = self.get_covariance_matrix(zbin_index)
       # Since the matrix is diagonal, inverting it is trivial
       Cinv = np.diag(1./np.diag(C))
-      dPdvecp = self.compute_dPdvecp(z)
+      dPdvecp = self.compute_dPdvecp(z, five_point=five_point)
       for i in range(n):
          for j in range(n):
             F[i,j] = np.dot(dPdvecp[i],np.dot(Cinv,dPdvecp[j]))
       return F
 
 
-   def compute_Fisher_matrix(self):
-      F = self.compute_Fisher_matrix_for_specific_zbin(0)
+   def compute_Fisher_matrix(self, five_point=False):
+      F = self.compute_Fisher_matrix_for_specific_zbin(0,five_point=five_point)
       for i in range(1,len(self.experiment.zedges)-1):
          F += self.compute_Fisher_matrix_for_specific_zbin(i)
       return F
@@ -198,4 +202,33 @@ class fisherForecast(object):
       plt.legend(loc=0,title=legendtitle)
       plt.xlim(self.khmin,self.khmax)
       if filename is not None: plt.savefig(filename+'.pdf')
+      plt.show()
+    
+    
+   def plot_error_ellipse(self,F=None,param1=None,param2=None,cs=['b','r']):
+      '''
+      param1 and param2 must be marginalized parameters.
+      '''
+      if param1 is None or param2 is None: 
+            print('parameters have not been set')
+      if F is None: F = self.compute_Fisher_matrix()
+      # find the 2x2 submatrix that corresponds to the two parameters of interest, which I call G
+      index1 = np.where(self.marg_params == param1)[0][0]
+      index2 = np.where(self.marg_params == param2)[0][0]
+      G = np.array([[F[index1,index1],F[index1,index2]],[F[index1,index2],F[index2,index2]]])
+      # write G = S D S^T for a diagonal matrix D
+      eigenvals,S = np.linalg.eig(G)
+      D = np.diag(eigenvals)
+      # find the solution of the ellipse in the diagonal basis
+      theta = np.linspace(0.,2.*np.pi,1000)
+      for i,f in enumerate(np.array([0.434,0.167])):
+         xprime = np.cos(theta) / np.sqrt(f * D[0,0])
+         yprime = np.sin(theta) / np.sqrt(f * D[1,1])
+         # transform back to the parameter basis
+         x,y = np.dot(S, np.array([xprime,yprime]))
+         x += self.params[param1]
+         y += self.params[param2]
+         plt.plot(x,y,c=cs[i])
+      plt.xlabel(param1)
+      plt.ylabel(param2)
       plt.show()

@@ -8,7 +8,7 @@ def compute_matter_power_spectrum(fishcast, z, linear=False):
    Returns a function of k [h/Mpc].
    '''
    experiment,cosmo = fishcast.experiment,fishcast.cosmo
-   kk = np.logspace(-4.0,1.0,200)
+   kk = np.logspace(-4.0,np.log10(40.),5000)
    if linear:
       pkcb = np.array([cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
    else:
@@ -96,7 +96,7 @@ def compute_f(fishcast, z, step=0.01):
    return lambda k: -(1.+z) * dPdz(k) / (2. * p_fid(k))
 
 
-def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True, b=1.5):
+def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True):
    '''
    Computes the power spectrum of the matter tracer assuming a linear
    bias parameter b. Returns a function of k [h/Mpc] and mu. For HI surverys
@@ -108,6 +108,7 @@ def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True
 
    if experiment.LBG: b = LBGb(z)
    elif experiment.HI: b = HIb(z)
+   else: b = fishcast.experiment.b(z)
 
    if RSD and Zerror: 
       f = compute_f(fishcast, z)

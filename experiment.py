@@ -1,11 +1,12 @@
 from headers import *
+import types
 
 class experiment(object):
    '''
    An object that contains all the information related to the experiment
    '''
 
-   def __init__(self, zmin=0.8, zmax=1.2, nbins=1, zedges=None, fsky=0.5, sigma_z=0.01, n=12., LBG=False, HI=False):
+   def __init__(self, zmin=0.8, zmax=1.2, nbins=1, zedges=None, fsky=0.5, sigma_z=0.01, n=12., b=1.5, LBG=False, HI=False):
 
       self.zmin = zmin
       self.zmax = zmax
@@ -16,5 +17,7 @@ class experiment(object):
       self.fsky = fsky
       self.sigma_z = sigma_z
       self.n = n*np.ones(nbins) #add option to set n to be an array
+      if isinstance(b, types.LambdaType): self.b = b
+      else: self.b = lambda z: b + 0.*z
       self.LBG = LBG
       self.HI = HI
