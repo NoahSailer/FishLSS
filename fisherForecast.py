@@ -71,16 +71,13 @@ class fisherForecast(object):
       with respect to the input parameter around the fidicual
       cosmology and redshift (for the respective bin). Returns
       an array of length Nk*Nmu.
-
-      To make the derivatives ~2 times faster, I don't 
-      recompute the cosmology after taking the derivative.
       '''
     
       P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
         
       if analytical:
          # for derivatives whose quantities are CLASS inputs, but can be computed analytically
-         if param == 'n_s': return P_fid * np.log(self.k/(self.params['h']*0.05))
+         if param == 'n_s': return P_fid * np.log(self.params['h']*self.k/0.05)
          if param == 'A_s': return P_fid / self.params['A_s']
       
       # derivatives that aren't class inputs that can be computed analytically
@@ -92,7 +89,7 @@ class fisherForecast(object):
          f = compute_f(self, z)(self.k)
          b = self.experiment.b(z) 
          return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
-      if param == 'N' : return np.ones(len(self.k))/2. #I don't know why the 2 would be there
+      if param == 'N' : return np.ones(len(self.k))
     
       default_value = self.params[param]
         
@@ -150,7 +147,6 @@ class fisherForecast(object):
       where n is the number of marginalized parameters.
       '''
       result = np.array([self.compute_dPdp(param=marg_param, z=z, five_point=five_point) for marg_param in self.marg_params]) 
-      self.cosmo.compute()
       return result
 
 
@@ -188,27 +184,41 @@ class fisherForecast(object):
       if marg_errors is None: marg_errors = self.compute_marginalized_errors(F=F)
       for i in range(len(self.marg_params)):
          marg_param = self.marg_params[i]
-         print('Relative error on '+marg_param+':',marg_errors[i]/self.params[marg_param])
+         if marg_param == 'log(A_s)': fid_val = np.log(self.params['A_s'])
+         else: fid_val = self.params[marg_param]
+         print('Relative error on '+marg_param+':',marg_errors[i]/fid_val)
+        
+        
+   def get_f_at_fixed_mu(self,f,mu):
+      closest_index = np.where(self.mu >= mu)[0][0]
+      indices = np.array([closest_index+n*self.Nmu for n in np.linspace(0,self.Nk-1,self.Nk)])
+      f_fixed = [f[i] for i in indices.astype(int)]
+      k = [self.k[i] for i in indices.astype(int)]
+      f = interp1d(k,f_fixed,kind='linear')
+      return f
 
 
    def pretty_plot(self,k,curves,xlabel=None,ylabel=None,c=None,datalabels=None,legendtitle=None,filename=None):
+      plt.figure(figsize=(14,12))
       pretty_k = [ k[i] for i in (self.Nmu*np.linspace(0,self.Nk-1,self.Nk)).astype(int) ]
       for i in range(len(curves)):
          curve = curves[i]
          pretty_p = [ curve[j] for j in (self.Nmu*np.linspace(0,self.Nk-1,self.Nk)).astype(int) ]
-         plt.semilogx(pretty_k, pretty_p, c=c[i],label=datalabels[i])
+         plt.semilogx(pretty_k, pretty_p, c=c[i],label=datalabels[i], lw=4)
       plt.xlabel(xlabel)
       plt.ylabel(ylabel)
       plt.legend(loc=0,title=legendtitle)
       plt.xlim(self.khmin,self.khmax)
+      plt.tight_layout()
       if filename is not None: plt.savefig(filename+'.pdf')
       plt.show()
     
     
-   def plot_error_ellipse(self,F=None,param1=None,param2=None,cs=['b','r']):
+   def plot_error_ellipse(self,F=None,param1=None,param2=None,cs=['lightblue','blue']):
       '''
       param1 and param2 must be marginalized parameters.
       '''
+      plt.figure(figsize=(14,12))
       if param1 is None or param2 is None: 
             print('parameters have not been set')
       if F is None: F = self.compute_Fisher_matrix()
@@ -221,14 +231,81 @@ class fisherForecast(object):
       D = np.diag(eigenvals)
       # find the solution of the ellipse in the diagonal basis
       theta = np.linspace(0.,2.*np.pi,1000)
-      for i,f in enumerate(np.array([0.434,0.167])):
+      for i,f in enumerate(np.array([0.167,0.434])):
          xprime = np.cos(theta) / np.sqrt(f * D[0,0])
          yprime = np.sin(theta) / np.sqrt(f * D[1,1])
          # transform back to the parameter basis
          x,y = np.dot(S, np.array([xprime,yprime]))
          x += self.params[param1]
          y += self.params[param2]
-         plt.plot(x,y,c=cs[i])
-      plt.xlabel(param1)
-      plt.ylabel(param2)
+         plt.fill(x,y,c=cs[i],alpha=0.6)
+      plt.xlabel(self.pretty_label(param1))
+      plt.ylabel(self.pretty_label(param2))
+      plt.tight_layout()
+      plt.show()
+        
+      
+   def pretty_label(self,param):
+      if param == 'log(A_s)': return r'$\log(A_s)$'
+      elif param == 'n_s': return r'$n_s$'
+      elif param == 'h': return r'$h$'
+      elif param == 'omega_b': return r'$\Omega_b$'
+      elif param == 'omega_cdm': return r'$\Omega_c$'
+      elif param == 'm_ncdm': return r'$\sum m_\nu$'
+      elif param == 'N': return r'$N$'
+      elif param == 'b': return r'$b$'
+      elif param == 'A_s': return r'$A_s$'
+      else: return param
+    
+    
+   def plot_posterior_matrix(self,F=None,cs=['lightblue','blue']):
+      if F is None: F = self.compute_Fisher_matrix()
+      n = len(self.marg_params)
+      fig, axs = plt.subplots(n, n,figsize=(n*7,n*7))#, gridspec_kw={'hspace': 0.1})
+      for i in range(n):
+         for j in range(n):
+            param1 = self.marg_params[j]
+            param2 = self.marg_params[i]  
+            if i < j: 
+               axs[i,j].axis('off')
+            elif i == j:
+               if param1 == 'log(A_s)': fid_value = np.log(self.params['A_s'])
+               else: fid_value = self.params[param1]
+               sigma = np.sqrt(np.linalg.inv(F)[i,i])
+               domain = np.linspace(fid_value-4.*sigma,fid_value+4.*sigma,100)
+               gauss = lambda x: np.exp(-(x-fid_value)**2./(2.*sigma**2.))/np.sqrt(2.*np.pi*sigma**2.)
+               axs[i,j].plot(domain,gauss(domain),c='k',lw=4)
+               axs[i,j].set_yticklabels([])
+               axs[i,j].get_shared_x_axes().join(axs[i,j], axs[n-1,j])
+               if i != n-1: axs[i,j].xaxis.set_ticklabels([])
+               axs[i,j].yaxis.set_visible(False)
+            else:    
+               axs[i,j].get_shared_x_axes().join(axs[i,j], axs[n-1,j])
+               axs[i,j].get_shared_y_axes().join(axs[i,j], axs[i,0])
+               if i != n-1: axs[i,j].xaxis.set_ticklabels([])
+               if j != 0: axs[i,j].yaxis.set_ticklabels([])
+               G = np.array([[F[i,i],F[i,j]],[F[i,j],F[j,j]]])
+               # write G = S D S^T for a diagonal matrix D
+               eigenvals,S = np.linalg.eig(G)
+               D = np.diag(eigenvals)
+               # find the solution of the ellipse in the diagonal basis
+               theta = np.linspace(0.,2.*np.pi,1000)
+               for k,f in enumerate(np.array([0.167,0.434])):
+                  xprime = np.cos(theta) / np.sqrt(f * D[0,0])
+                  yprime = np.sin(theta) / np.sqrt(f * D[1,1])
+                  # transform back to the parameter basis
+                  x,y = np.dot(S, np.array([xprime,yprime]))
+                  if param1 == 'log(A_s)': fid_val1 = np.log(self.params['A_s'])
+                  else: fid_val1 = self.params[param1]
+                  if param2 == 'log(A_s)': fid_val2 = np.log(self.params['A_s'])
+                  else: fid_val2 = self.params[param2]
+                  x += fid_val1
+                  y += fid_val2
+                  axs[i,j].fill(x,y,c=cs[k],alpha=0.6)
+            if i == n-1: 
+                axs[i,j].set_xlabel(self.pretty_label(param1))
+            if j == 0: 
+                axs[i,j].set_ylabel(self.pretty_label(param2))
+      plt.subplots_adjust(wspace=0.05, hspace=0.03)
+      plt.tight_layout()
       plt.show()

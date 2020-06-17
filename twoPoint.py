@@ -8,7 +8,7 @@ def compute_matter_power_spectrum(fishcast, z, linear=False):
    Returns a function of k [h/Mpc].
    '''
    experiment,cosmo = fishcast.experiment,fishcast.cosmo
-   kk = np.logspace(-4.0,np.log10(40.),5000)
+   kk = np.logspace(-5.0,np.log10(30.),5000)
    if linear:
       pkcb = np.array([cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
    else:
@@ -116,13 +116,13 @@ def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
       p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b+f(k)*mu**2.)**2.
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
-      return p
+      return p 
 
    elif RSD and not Zerror: 
       f = compute_f(fishcast, z)
       p = lambda k,mu: pmatter(k) * (b+f(k)*mu**2.)**2.
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
-      return p
+      return p 
 
    elif not RSD and Zerror: 
       Hz = cosmo.Hubble(z)*(299792.458)
