@@ -10,7 +10,8 @@ class fisherForecast(object):
    Fisher matrix for an arbitrary number of parameters.
    '''
 
-   def __init__(self, khmin=1e-4, khmax=0.25, cosmo=None, experiment=None, Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h'])):
+   def __init__(self, khmin=1e-4, khmax=0.25, cosmo=None, experiment=None, 
+                Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h'])):
       '''
       '''
       self.khmin = khmin
@@ -39,6 +40,9 @@ class fisherForecast(object):
       self.experiment = experiment
       self.cosmo = cosmo
       self.params = params
+      if 'log(A_s)' in self.marg_params and 'A_s' not in np.array(list(params.keys())):
+         print('Must included A_s in params if trying to marginalize over log(A_s).')
+         return
       k = np.logspace(np.log10(self.khmin),np.log10(self.khmax),self.Nk)
       dk = list(k[1:]-k[:-1])
       dk.append(dk[-1])
@@ -53,8 +57,8 @@ class fisherForecast(object):
       self.dmu = np.tile(dmu,self.Nk)
       self.P_fid = np.array([compute_tracer_power_spectrum(self,z)(self.k,self.mu) for z in experiment.zcenters])
       self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) for i in range(len(experiment.zedges)-1)])
-
-
+        
+        
    def comov_vol(self,zmin,zmax):
       '''
       Returns the comoving volume in Mpc^3/h^3 between 
@@ -65,7 +69,9 @@ class fisherForecast(object):
       return self.experiment.fsky*(vbig - vsmall)*self.params['h']**3.
 
 
-   def compute_dPdp(self, param, z, relative_step=0.01, one_sided=False, five_point=False, analytical=True, Noise=False):
+   def compute_dPdp(self, param, z, relative_step=0.01, one_sided=False, five_point=False, 
+                    analytical=True, Noise=False, log10z_c=3.56207, thetai_scf=2.83, fEDE_step=0.1,
+                    omega_lin=0.01, phi_lin = np.pi/2.):
       '''
       Calculates the derivative of the galaxy power spectrum
       with respect to the input parameter around the fidicual
@@ -80,7 +86,7 @@ class fisherForecast(object):
          if param == 'n_s': return P_fid * np.log(self.params['h']*self.k/0.05)
          if param == 'A_s': return P_fid / self.params['A_s']
       
-      # derivatives that aren't class inputs that can be computed analytically
+      # derivatives that aren't CLASS inputs that can be computed analytically
       if param == 'log(A_s)' : return P_fid
       if param == 'b' : 
          pmatter = compute_matter_power_spectrum(self, z)(self.k)
@@ -91,12 +97,33 @@ class fisherForecast(object):
          return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
       if param == 'N' : return np.ones(len(self.k))
     
+      # derivative of early dark energy parameter fEDE at specified values of log10z_c and thetai_scf (Hill+2020)
+      if param == 'fEDE':
+         EDE_params = {'log10z_c': log10z_c,'fEDE': fEDE_step,'thetai_scf': thetai_scf,
+                       'Omega_Lambda':0.0,'Omega_fld':0,'Omega_scf':-1,
+                       'n_scf':3,'CC_scf':1,'scf_tuning_index':3,
+                       'scf_parameters':'1, 1, 1, 1, 1, 0.0',
+                       'attractor_ic_scf':'no'}
+         self.cosmo.set(EDE_params)
+         self.cosmo.compute()
+         P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         self.cosmo.set({'fEDE':2.*fEDE_step})
+         self.cosmo.compute()
+         P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         self.cosmo = Class()
+         self.cosmo.set(self.params)
+         self.cosmo.compute()
+         return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * fEDE_step)
+        
+      # derivatives of parameters related to primordial features (Beutler+20)
+      if param == 'A_lin': return P_fid * np.sin(omega_lin * self.k + phi_lin)
+    
       default_value = self.params[param]
         
       def set_param(value):
          self.cosmo.set({param : value})
          self.params[param] = value
-
+        
       # code for numerical differentiation
       if one_sided:
          self.cosmo.compute()
@@ -174,31 +201,50 @@ class fisherForecast(object):
       return F
 
 
-   def compute_marginalized_errors(self,F=None):
+   def non_default_fidval(self, param):
+      if param == 'log(A_s)': return np.log(self.params['A_s'])
+      if param == 'b': return self.experiment.b(self.zcenters[0]) # assumes b(z) = const.
+      if param == 'N': return 1./self.experiment.n[0] # assumes N(z) = const.
+      if param == 'fEDE': return 0.
+      if param == 'A_lin': return 0.
+      return
+
+
+   def compute_marginalized_errors(self, F=None):
       if F is None: F = self.compute_Fisher_matrix()
       Finv = np.linalg.inv(F)
       return [np.sqrt(Finv[i,i]) for i in range(len(self.marg_params))] 
+    
 
-
-   def print_marginalized_errors(self,marg_errors=None,F=None):
+   def print_marginalized_errors(self, marg_errors=None, F=None):
       if marg_errors is None: marg_errors = self.compute_marginalized_errors(F=F)
       for i in range(len(self.marg_params)):
          marg_param = self.marg_params[i]
-         if marg_param == 'log(A_s)': fid_val = np.log(self.params['A_s'])
-         else: fid_val = self.params[marg_param]
-         print('Relative error on '+marg_param+':',marg_errors[i]/fid_val)
+         print('Error on '+marg_param+':',marg_errors[i])
         
         
    def get_f_at_fixed_mu(self,f,mu):
+      '''
+      For a function f(k,mu), which is represented as an array of length Nmu*Nk,
+      return a function f(k)
+      '''
       closest_index = np.where(self.mu >= mu)[0][0]
       indices = np.array([closest_index+n*self.Nmu for n in np.linspace(0,self.Nk-1,self.Nk)])
       f_fixed = [f[i] for i in indices.astype(int)]
       k = [self.k[i] for i in indices.astype(int)]
       f = interp1d(k,f_fixed,kind='linear')
       return f
+    
+   
+   ############################################################################################################
+   ############################################################################################################
+   # Functions for plotting
 
 
    def pretty_plot(self,k,curves,xlabel=None,ylabel=None,c=None,datalabels=None,legendtitle=None,filename=None):
+      '''
+      Plot's a function f(k,mu) at mu=0.
+      '''
       plt.figure(figsize=(14,12))
       pretty_k = [ k[i] for i in (self.Nmu*np.linspace(0,self.Nk-1,self.Nk)).astype(int) ]
       for i in range(len(curves)):
@@ -214,9 +260,22 @@ class fisherForecast(object):
       plt.show()
     
     
-   def plot_error_ellipse(self,F=None,param1=None,param2=None,cs=['lightblue','blue']):
+   def pretty_label(self, param):
+      if param == 'log(A_s)': return r'$\log(A_s)$'
+      elif param == 'n_s': return r'$n_s$'
+      elif param == 'h': return r'$h$'
+      elif param == 'omega_b': return r'$\Omega_b$'
+      elif param == 'omega_cdm': return r'$\Omega_c$'
+      elif param == 'm_ncdm': return r'$\sum m_\nu$'
+      elif param == 'N': return r'$N$'
+      elif param == 'b': return r'$b$'
+      elif param == 'A_s': return r'$A_s$'
+      else: return param
+    
+    
+   def plot_error_ellipse(self, F=None, param1=None, param2=None, cs=['lightblue','blue']):
       '''
-      param1 and param2 must be marginalized parameters.
+      param1 and param2 must be marginalized parameters. 
       '''
       plt.figure(figsize=(14,12))
       if param1 is None or param2 is None: 
@@ -243,34 +302,22 @@ class fisherForecast(object):
       plt.ylabel(self.pretty_label(param2))
       plt.tight_layout()
       plt.show()
-        
-      
-   def pretty_label(self,param):
-      if param == 'log(A_s)': return r'$\log(A_s)$'
-      elif param == 'n_s': return r'$n_s$'
-      elif param == 'h': return r'$h$'
-      elif param == 'omega_b': return r'$\Omega_b$'
-      elif param == 'omega_cdm': return r'$\Omega_c$'
-      elif param == 'm_ncdm': return r'$\sum m_\nu$'
-      elif param == 'N': return r'$N$'
-      elif param == 'b': return r'$b$'
-      elif param == 'A_s': return r'$A_s$'
-      else: return param
+           
     
-    
-   def plot_posterior_matrix(self,F=None,cs=['lightblue','blue']):
+   def plot_posterior_matrix(self, F=None, cs=['lightblue','blue'], param_subset=None):
+      if param_subset is None: param_subset = self.marg_params
       if F is None: F = self.compute_Fisher_matrix()
-      n = len(self.marg_params)
+      n = len(param_subset)
       fig, axs = plt.subplots(n, n,figsize=(n*7,n*7))#, gridspec_kw={'hspace': 0.1})
       for i in range(n):
          for j in range(n):
-            param1 = self.marg_params[j]
-            param2 = self.marg_params[i]  
+            param1 = param_subset[j]
+            param2 = param_subset[i]  
             if i < j: 
                axs[i,j].axis('off')
             elif i == j:
-               if param1 == 'log(A_s)': fid_value = np.log(self.params['A_s'])
-               else: fid_value = self.params[param1]
+               try: fid_value = self.params[param1]
+               except KeyError: fid_value = self.non_default_fidval(param1)
                sigma = np.sqrt(np.linalg.inv(F)[i,i])
                domain = np.linspace(fid_value-4.*sigma,fid_value+4.*sigma,100)
                gauss = lambda x: np.exp(-(x-fid_value)**2./(2.*sigma**2.))/np.sqrt(2.*np.pi*sigma**2.)
@@ -295,10 +342,10 @@ class fisherForecast(object):
                   yprime = np.sin(theta) / np.sqrt(f * D[1,1])
                   # transform back to the parameter basis
                   x,y = np.dot(S, np.array([xprime,yprime]))
-                  if param1 == 'log(A_s)': fid_val1 = np.log(self.params['A_s'])
-                  else: fid_val1 = self.params[param1]
-                  if param2 == 'log(A_s)': fid_val2 = np.log(self.params['A_s'])
-                  else: fid_val2 = self.params[param2]
+                  try: fid_val1 = self.params[param1]
+                  except KeyError: fid_val1 = self.non_default_fidval(param1)
+                  try: fid_val2 = self.params[param2]
+                  except KeyError: fid_val2 = self.non_default_fidval(param2)
                   x += fid_val1
                   y += fid_val2
                   axs[i,j].fill(x,y,c=cs[k],alpha=0.6)

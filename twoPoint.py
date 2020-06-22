@@ -9,10 +9,13 @@ def compute_matter_power_spectrum(fishcast, z, linear=False):
    '''
    experiment,cosmo = fishcast.experiment,fishcast.cosmo
    kk = np.logspace(-5.0,np.log10(30.),5000)
-   if linear:
-      pkcb = np.array([cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
-   else:
-      pkcb = np.array([cosmo.pk(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   #if linear:
+   #   pkcb = np.array([cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   #else:
+   #   pkcb = np.array([cosmo.pk(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   D = fishcast.cosmo.scale_independent_growth_factor(z)
+   pkcb0 = np.array([cosmo.pk(k*fishcast.params['h'],0.)*fishcast.params['h']**3. for k in kk])
+   pkcb = D**2. * pkcb0
    p = interp1d(kk, pkcb, kind='linear', bounds_error=False, fill_value=0.)
    return p
 
