@@ -11,14 +11,22 @@ class fisherForecast(object):
    '''
 
    def __init__(self, khmin=1e-4, khmax=0.25, cosmo=None, experiment=None, 
-                Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h'])):
-      '''
-      '''
+                Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h']),
+                fEDE=0., log10z_c=3.56207, thetai_scf=2.83, A_lin=0., 
+                omega_lin=0.01, phi_lin=np.pi/2.):
       self.khmin = khmin
       self.khmax = khmax
       self.Nmu = Nmu
       self.Nk = Nk
       self.marg_params = marg_params
+      # parameters for EDE. These are redundant if fEDE has a nonzero fiducial value.
+      self.fEDE = fEDE
+      self.log10z_c = log10z_c
+      self.thetai_scf = thetai_scf
+      # parameters for primordial wiggles
+      self.A_lin = A_lin 
+      self.omega_lin = omega_lin
+      self.phi_lin = phi_lin
 
       self.experiment = None
       self.cosmo = None
@@ -43,6 +51,10 @@ class fisherForecast(object):
       if 'log(A_s)' in self.marg_params and 'A_s' not in np.array(list(params.keys())):
          print('Must included A_s in params if trying to marginalize over log(A_s).')
          return
+      if 'fEDE' in np.array(list(params.keys())):
+         self.fEDE = params['fEDE']
+         self.log10z_c = params['log10z_c']
+         self.thetai_scf = params['thetai_scf']
       k = np.logspace(np.log10(self.khmin),np.log10(self.khmax),self.Nk)
       dk = list(k[1:]-k[:-1])
       dk.append(dk[-1])
@@ -70,8 +82,7 @@ class fisherForecast(object):
 
 
    def compute_dPdp(self, param, z, relative_step=0.01, one_sided=False, five_point=False, 
-                    analytical=True, Noise=False, log10z_c=3.56207, thetai_scf=2.83, fEDE_step=0.1,
-                    omega_lin=0.01, phi_lin = np.pi/2.):
+                    analytical=True, Noise=False, fEDE_step=0.1):
       '''
       Calculates the derivative of the galaxy power spectrum
       with respect to the input parameter around the fidicual
@@ -88,18 +99,27 @@ class fisherForecast(object):
       
       # derivatives that aren't CLASS inputs that can be computed analytically
       if param == 'log(A_s)' : return P_fid
-      if param == 'b' : 
+      if param == 'b' or param == 'f_NL': 
          pmatter = compute_matter_power_spectrum(self, z)(self.k)
          Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h']
          sigma_parallel = (3.e5)*(1.+z)*self.experiment.sigma_z/Hz
          f = compute_f(self, z)(self.k)
          b = self.experiment.b(z) 
-         return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
+         if param == 'b': return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
+         # derivative wrt f_NL. 
+         D = 0.76 * self.cosmo.scale_independent_growth_factor(z) # normalized so D(a) = a in the MD era
+         # hacky way of calculating the transfer function
+         T = np.sqrt(pmatter/self.k**self.params['n_s'])
+         T /= T[0]
+         fNL_factor = 3.*1.68*(b-1.)*self.params['omega_cdm']*(100.*self.params['h'])**2.
+         fNL_factor /= D * self.k**2. * T * 299792.458**2.
+         return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.) * fNL_factor
+         
       if param == 'N' : return np.ones(len(self.k))
     
-      # derivative of early dark energy parameter fEDE at specified values of log10z_c and thetai_scf (Hill+2020)
-      if param == 'fEDE':
-         EDE_params = {'log10z_c': log10z_c,'fEDE': fEDE_step,'thetai_scf': thetai_scf,
+      # derivative of early dark energy parameters (Hill+2020)
+      if param == 'fEDE' and self.fEDE == 0.:
+         EDE_params = {'log10z_c': self.log10z_c,'fEDE': fEDE_step,'thetai_scf': self.thetai_scf,
                        'Omega_Lambda':0.0,'Omega_fld':0,'Omega_scf':-1,
                        'n_scf':3,'CC_scf':1,'scf_tuning_index':3,
                        'scf_parameters':'1, 1, 1, 1, 1, 0.0',
@@ -114,20 +134,28 @@ class fisherForecast(object):
          self.cosmo.set(self.params)
          self.cosmo.compute()
          return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * fEDE_step)
-        
-      # derivatives of parameters related to primordial features (Beutler+20)
-      if param == 'A_lin': return P_fid * np.sin(omega_lin * self.k + phi_lin)
+      
+      if (param == 'log10z_c' or param == 'thetai_scf') and self.fEDE == 0.:
+         print('Attempted to marginalize over log10z_c or thetai_scf when fEDE has a fiducial value of 0.')
+         return
     
+      # derivatives of parameters related to primordial features (Beutler+20)
+      P_fid_no_wiggles = compute_tracer_power_spectrum(self,z,Wiggles=False)(self.k,self.mu)
+      if param == 'A_lin': return P_fid_no_wiggles * np.sin(self.omega_lin * self.k + self.phi_lin)
+      if (param == 'omega_lin' or param == 'phi_lin') and self.A_lin == 0.:
+         print('Attemped to marginalize over omega_lin or phi_lin when A_lin has a fiducial value of 0.')
+         return
+      if param == 'omega_lin': return P_fid_no_wiggles * self.A_lin * np.cos(self.omega_lin * self.k + self.phi_lin) * self.k
+      if param == 'phi_lin': return P_fid_no_wiggles * self.A_lin * np.cos(self.omega_lin * self.k + self.phi_lin)
+    
+      # brute force numerical differentiation
       default_value = self.params[param]
-        
+               
       def set_param(value):
          self.cosmo.set({param : value})
          self.params[param] = value
         
-      # code for numerical differentiation
       if one_sided:
-         self.cosmo.compute()
-         P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
          set_param(default_value * (1. + relative_step))
          self.cosmo.compute()
          P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
@@ -155,6 +183,7 @@ class fisherForecast(object):
          self.cosmo.compute()
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * default_value * relative_step)
 
+      # defaults to a two sided derivative
       set_param(default_value * (1. + relative_step))
       self.cosmo.compute()
       P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
@@ -202,11 +231,16 @@ class fisherForecast(object):
 
 
    def non_default_fidval(self, param):
+      '''
+      For parameters that aren't default CLASS(-EDE) inputs.
+      Returns their fiducial value. 
+      '''
       if param == 'log(A_s)': return np.log(self.params['A_s'])
       if param == 'b': return self.experiment.b(self.zcenters[0]) # assumes b(z) = const.
       if param == 'N': return 1./self.experiment.n[0] # assumes N(z) = const.
       if param == 'fEDE': return 0.
       if param == 'A_lin': return 0.
+      if param == 'f_NL': return 0.
       return
 
 
@@ -270,6 +304,8 @@ class fisherForecast(object):
       elif param == 'N': return r'$N$'
       elif param == 'b': return r'$b$'
       elif param == 'A_s': return r'$A_s$'
+      elif param == 'f_NL': return r'$f_{NL}$'
+      elif param == 'fEDE': return r'$f_{EDE}$'
       else: return param
     
     

@@ -92,6 +92,9 @@ def HIb(z): return castorinaBias(z)
 
 
 def compute_f(fishcast, z, step=0.01):
+   '''
+   Returns the logarithmic derivative of the linear growth rate.
+   '''
    p_hi = compute_matter_power_spectrum(fishcast,z=z+step)
    p_higher = compute_matter_power_spectrum(fishcast,z=z+2.*step)
    p_fid = compute_matter_power_spectrum(fishcast,z=z)
@@ -99,7 +102,7 @@ def compute_f(fishcast, z, step=0.01):
    return lambda k: -(1.+z) * dPdz(k) / (2. * p_fid(k))
 
 
-def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True):
+def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True, Wiggles=True):
    '''
    Computes the power spectrum of the matter tracer assuming a linear
    bias parameter b. Returns a function of k [h/Mpc] and mu. For HI surverys
@@ -108,6 +111,10 @@ def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True
    experiment = fishcast.experiment
    cosmo = fishcast.cosmo
    pmatter = compute_matter_power_spectrum(fishcast, z)
+   if Wiggles:
+      wiggles = lambda k: 1. + fishcast.A_lin * np.sin(fishcast.omega_lin * k + fishcast.phi_lin)
+   else:
+      wiggles = lambda k: 1. + k*0.
 
    if experiment.LBG: b = LBGb(z)
    elif experiment.HI: b = HIb(z)
@@ -117,24 +124,24 @@ def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True
       f = compute_f(fishcast, z)
       Hz = cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
-      p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b+f(k)*mu**2.)**2.
+      p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b+f(k)*mu**2.)**2. * wiggles(k)
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
       return p 
 
    elif RSD and not Zerror: 
       f = compute_f(fishcast, z)
-      p = lambda k,mu: pmatter(k) * (b+f(k)*mu**2.)**2.
+      p = lambda k,mu: pmatter(k) * (b+f(k)*mu**2.)**2. * wiggles(k)
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
       return p 
 
    elif not RSD and Zerror: 
       Hz = cosmo.Hubble(z)*(299792.458)
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
-      p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b**2.)
+      p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b**2.) * wiggles(k)
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
       return p
 
    else: 
-      p = lambda k,mu: pmatter(k) * (b**2.)
+      p = lambda k,mu: pmatter(k) * (b**2.) * wiggles(k)
       if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
       return p
