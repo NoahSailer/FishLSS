@@ -11,9 +11,9 @@ class fisherForecast(object):
    '''
 
    def __init__(self, khmin=1e-4, khmax=0.25, cosmo=None, experiment=None, 
-                Nmu=100, Nk=100, params=None, marg_params=np.array(['A_s,h']),
+                Nmu=50, Nk=50, params=None, marg_params=np.array(['A_s,h']),
                 fEDE=0., log10z_c=3.56207, thetai_scf=2.83, A_lin=0., 
-                omega_lin=0.01, phi_lin=np.pi/2.):
+                omega_lin=0.01, phi_lin=np.pi/2., velocileptors=False):
       self.khmin = khmin
       self.khmax = khmax
       self.Nmu = Nmu
@@ -27,6 +27,7 @@ class fisherForecast(object):
       self.A_lin = A_lin 
       self.omega_lin = omega_lin
       self.phi_lin = phi_lin
+      self.velocileptors = velocileptors
 
       self.experiment = None
       self.cosmo = None
@@ -57,7 +58,8 @@ class fisherForecast(object):
          self.thetai_scf = params['thetai_scf']
       k = np.logspace(np.log10(self.khmin),np.log10(self.khmax),self.Nk)
       dk = list(k[1:]-k[:-1])
-      dk.append(dk[-1])
+      #dk.append(dk[-1])
+      dk.insert(0,dk[0])
       dk = np.array(dk)
       mu = np.linspace(0.,1.,self.Nmu)
       dmu = list(mu[1:]-mu[:-1])
@@ -67,8 +69,9 @@ class fisherForecast(object):
       self.dk = np.repeat(dk,self.Nmu)
       self.mu = np.tile(mu,self.Nk)
       self.dmu = np.tile(dmu,self.Nk)
-      self.P_fid = np.array([compute_tracer_power_spectrum(self,z)(self.k,self.mu) for z in experiment.zcenters])
-      self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) for i in range(len(experiment.zedges)-1)])
+      self.P_fid = np.array([compute_tracer_power_spectrum(self,z) for i,z in enumerate(experiment.zcenters)])
+      self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) \
+                               for i in range(len(experiment.zedges)-1)])
         
         
    def comov_vol(self,zmin,zmax):
@@ -90,7 +93,7 @@ class fisherForecast(object):
       an array of length Nk*Nmu.
       '''
     
-      P_fid = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+      P_fid = compute_tracer_power_spectrum(self,z)
         
       if analytical:
          # for derivatives whose quantities are CLASS inputs, but can be computed analytically
@@ -100,18 +103,18 @@ class fisherForecast(object):
       # derivatives that aren't CLASS inputs that can be computed analytically
       if param == 'log(A_s)' : return P_fid
       if param == 'b' or param == 'f_NL': 
-         pmatter = compute_matter_power_spectrum(self, z)(self.k)
+         pmatter = compute_matter_power_spectrum(self, z)
          Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h']
          sigma_parallel = (3.e5)*(1.+z)*self.experiment.sigma_z/Hz
-         f = compute_f(self, z)(self.k)
+         f = compute_f(self, z)
          b = self.experiment.b(z) 
          if param == 'b': return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.)
-         # derivative wrt f_NL. 
+         # derivative wrt f_NL
          D = 0.76 * self.cosmo.scale_independent_growth_factor(z) # normalized so D(a) = a in the MD era
          # hacky way of calculating the transfer function
          T = np.sqrt(pmatter/self.k**self.params['n_s'])
          T /= T[0]
-         fNL_factor = 3.*1.68*(b-1.)*self.params['omega_cdm']*(100.*self.params['h'])**2.
+         fNL_factor = 3.*1.68*(b-1.)*(self.params['omega_cdm']/self.params['h']**2.)*100.**2.
          fNL_factor /= D * self.k**2. * T * 299792.458**2.
          return pmatter * np.exp(-(self.k*self.mu*sigma_parallel)**2.) * 2. * (b+f*self.mu**2.) * fNL_factor
          
@@ -126,10 +129,10 @@ class fisherForecast(object):
                        'attractor_ic_scf':'no'}
          self.cosmo.set(EDE_params)
          self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self,z)
          self.cosmo.set({'fEDE':2.*fEDE_step})
          self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z)
          self.cosmo = Class()
          self.cosmo.set(self.params)
          self.cosmo.compute()
@@ -140,7 +143,7 @@ class fisherForecast(object):
          return
     
       # derivatives of parameters related to primordial features (Beutler+20)
-      P_fid_no_wiggles = compute_tracer_power_spectrum(self,z,Wiggles=False)(self.k,self.mu)
+      P_fid_no_wiggles = compute_tracer_power_spectrum(self,z,Wiggles=False)
       if param == 'A_lin': return P_fid_no_wiggles * np.sin(self.omega_lin * self.k + self.phi_lin)
       if (param == 'omega_lin' or param == 'phi_lin') and self.A_lin == 0.:
          print('Attemped to marginalize over omega_lin or phi_lin when A_lin has a fiducial value of 0.')
@@ -158,10 +161,10 @@ class fisherForecast(object):
       if one_sided:
          set_param(default_value * (1. + relative_step))
          self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self,z)
          set_param(default_value * (1. + 2.*relative_step))
          self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z)
          set_param(default_value)
          self.cosmo.compute()
          return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * default_value * relative_step)
@@ -169,16 +172,16 @@ class fisherForecast(object):
       if five_point:
          set_param(default_value * (1. + relative_step))
          self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_hi = compute_tracer_power_spectrum(self,z)
          set_param(default_value * (1. + 2.*relative_step))
          self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z)
          set_param(default_value * (1. - relative_step))
          self.cosmo.compute()
-         P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_low = compute_tracer_power_spectrum(self,z)
          set_param(default_value * (1. - 2.*relative_step))
          self.cosmo.compute()
-         P_dummy_lower = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z)
          set_param(default_value)
          self.cosmo.compute()
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * default_value * relative_step)
@@ -186,10 +189,10 @@ class fisherForecast(object):
       # defaults to a two sided derivative
       set_param(default_value * (1. + relative_step))
       self.cosmo.compute()
-      P_dummy_hi = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+      P_dummy_hi = compute_tracer_power_spectrum(self,z)
       set_param(default_value * (1. - relative_step))
       self.cosmo.compute()
-      P_dummy_low = compute_tracer_power_spectrum(self,z)(self.k,self.mu)
+      P_dummy_low = compute_tracer_power_spectrum(self,z)
       set_param(default_value)
       self.cosmo.compute()
       return (P_dummy_hi - P_dummy_low) / (2. * default_value * relative_step)      
@@ -215,11 +218,11 @@ class fisherForecast(object):
       F = np.ones((n,n))
       C = self.get_covariance_matrix(zbin_index)
       # Since the matrix is diagonal, inverting it is trivial
-      Cinv = np.diag(1./np.diag(C))
+      Cinv = 1./C
       dPdvecp = self.compute_dPdvecp(z, five_point=five_point)
       for i in range(n):
          for j in range(n):
-            F[i,j] = np.dot(dPdvecp[i],np.dot(Cinv,dPdvecp[j]))
+            F[i,j] = np.sum(dPdvecp[i]*Cinv*dPdvecp[j])
       return F
 
 
@@ -238,8 +241,8 @@ class fisherForecast(object):
       if param == 'log(A_s)': return np.log(self.params['A_s'])
       if param == 'b': return self.experiment.b(self.zcenters[0]) # assumes b(z) = const.
       if param == 'N': return 1./self.experiment.n[0] # assumes N(z) = const.
-      if param == 'fEDE': return 0.
-      if param == 'A_lin': return 0.
+      if param == 'fEDE': return self.fEDE
+      if param == 'A_lin': return self.A_lin
       if param == 'f_NL': return 0.
       return
 

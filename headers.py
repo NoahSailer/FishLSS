@@ -13,6 +13,7 @@ from classy import Class
 from experiment import *
 from fisherForecast import *
 import sys
+from LPT.moment_expansion_fftw import MomentExpansion
 
 ##################################################################################
 # for pretty plots

@@ -1,23 +1,16 @@
 from headers import *
 from castorina import castorinaBias,castorinaPn
+from LPT.moment_expansion_fftw import MomentExpansion
 
-def compute_matter_power_spectrum(fishcast, z, linear=False):
+def compute_matter_power_spectrum(fishcast, z):
    '''
-   Computes the matter power spectrum for a given cosmology
+   Computes the linear matter power spectrum for a given cosmology
    at redshift z. Assumes that cosmo.comute() has already been called.
    Returns a function of k [h/Mpc].
    '''
-   experiment,cosmo = fishcast.experiment,fishcast.cosmo
-   kk = np.logspace(-5.0,np.log10(30.),5000)
-   #if linear:
-   #   pkcb = np.array([cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
-   #else:
-   #   pkcb = np.array([cosmo.pk(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
-   D = fishcast.cosmo.scale_independent_growth_factor(z)
-   pkcb0 = np.array([cosmo.pk(k*fishcast.params['h'],0.)*fishcast.params['h']**3. for k in kk])
-   pkcb = D**2. * pkcb0
-   p = interp1d(kk, pkcb, kind='linear', bounds_error=False, fill_value=0.)
-   return p
+   kk = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),fishcast.Nk)
+   pmatter = np.array([fishcast.cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   return np.repeat(pmatter,fishcast.Nmu)
 
 
 def LBGb(z):
@@ -98,11 +91,12 @@ def compute_f(fishcast, z, step=0.01):
    p_hi = compute_matter_power_spectrum(fishcast,z=z+step)
    p_higher = compute_matter_power_spectrum(fishcast,z=z+2.*step)
    p_fid = compute_matter_power_spectrum(fishcast,z=z)
-   dPdz = lambda k: (p_fid(k) - (4./3.) * p_hi(k) + (1./3.) * p_higher(k)) / ((-2./3.)*step)
-   return lambda k: -(1.+z) * dPdz(k) / (2. * p_fid(k))
+   dPdz = (p_fid - (4./3.) * p_hi + (1./3.) * p_higher) / ((-2./3.)*step)
+   return -(1.+z) * dPdz / (2. * p_fid)
 
 
-def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True, Wiggles=True):
+def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True, 
+                                  Wiggles=True):
    '''
    Computes the power spectrum of the matter tracer assuming a linear
    bias parameter b. Returns a function of k [h/Mpc] and mu. For HI surverys
@@ -111,37 +105,53 @@ def compute_tracer_power_spectrum(fishcast, z, RSD=True, Zerror=True, Noise=True
    experiment = fishcast.experiment
    cosmo = fishcast.cosmo
    pmatter = compute_matter_power_spectrum(fishcast, z)
-   if Wiggles:
-      wiggles = lambda k: 1. + fishcast.A_lin * np.sin(fishcast.omega_lin * k + fishcast.phi_lin)
-   else:
-      wiggles = lambda k: 1. + k*0.
+    
+   if Wiggles: wiggles = lambda k: 1. + fishcast.A_lin * np.sin(fishcast.omega_lin * k + fishcast.phi_lin)
+   else: wiggles = lambda k: 1. + k*0.
+        
+   if fishcast.velocileptors and not experiment.HI:
+      D = fishcast.cosmo.scale_independent_growth_factor(z)
+      f = fishcast.cosmo.scale_independent_growth_factor_f(z)
+      #f = compute_f(fishcast, z)
+      klin = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),fishcast.Nk)
+      plin = np.array([fishcast.cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+      mome = MomentExpansion(klin,plin,kmin=fishcast.khmin,kmax=fishcast.khmax,nk=fishcast.Nk)
+      biases = [0.70,0.5,-0.3,0.0]
+      cterms = [10.0,20.,-60.]
+      stoch  = [1800.,-1000.]
+      pars   = biases + cterms + stoch
+      kw,pkw = mome.compute_redshift_space_power_at_mu(pars,f,fishcast.mu,reduced=True,Nmu=fishcast.Nmu)
+      return pkw
 
    if experiment.LBG: b = LBGb(z)
    elif experiment.HI: b = HIb(z)
    else: b = fishcast.experiment.b(z)
-
+    
+   K,MU = fishcast.k,fishcast.mu
+    
    if RSD and Zerror: 
-      f = compute_f(fishcast, z)
+      f = fishcast.cosmo.scale_independent_growth_factor_f(z)
+      #f = compute_f(fishcast, z)
       Hz = cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
-      p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b+f(k)*mu**2.)**2. * wiggles(k)
-      if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
+      p = pmatter * np.exp(-(K*MU*sigma_parallel)**2.) * (b+f*MU**2.)**2. * wiggles(K)
+      if experiment.HI and Noise: return p + PNoise(fishcast, z)(K,MU)
       return p 
 
    elif RSD and not Zerror: 
       f = compute_f(fishcast, z)
-      p = lambda k,mu: pmatter(k) * (b+f(k)*mu**2.)**2. * wiggles(k)
-      if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
+      p = pmatter * (b+f*MU**2.)**2. * wiggles(K)
+      if experiment.HI and Noise: return p + PNoise(fishcast, z)(K,MU)
       return p 
 
    elif not RSD and Zerror: 
       Hz = cosmo.Hubble(z)*(299792.458)
       sigma_parallel = (3.e5)*(1.+z)*experiment.sigma_z/Hz
-      p = lambda k,mu: pmatter(k) * np.exp(-(k*mu*sigma_parallel)**2.) * (b**2.) * wiggles(k)
-      if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
+      p = pmatter * np.exp(-(K*MU*sigma_parallel)**2.) * (b**2.) * wiggles(K)
+      if experiment.HI and Noise: return p + PNoise(fishcast, z)(K,MU)
       return p
 
    else: 
-      p = lambda k,mu: pmatter(k) * (b**2.) * wiggles(k)
-      if experiment.HI and Noise: return lambda k,mu: p(k,mu) + PNoise(fishcast, z)(k,mu)
+      p = pmatter * (b**2.) * wiggles(K)
+      if experiment.HI and Noise: return p + PNoise(fishcast, z)(K,MU)
       return p

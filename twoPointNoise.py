@@ -22,13 +22,14 @@ def compute_covariance_matrix(fishcast, zbin_index):
    z = fishcast.experiment.zcenters[zbin_index]
    prefactor = (4.*np.pi**2.) / (fishcast.dk*fishcast.dmu*fishcast.Vsurvey[zbin_index]*fishcast.k**2.)
    if fishcast.experiment.HI: 
-      pn = compute_tracer_power_spectrum(fishcast, z)(fishcast.k,fishcast.mu)
+      pn = compute_tracer_power_spectrum(fishcast, z)
       diagonal_values = prefactor * pn**2.
       return np.diag(diagonal_values)
    if fishcast.experiment.LBG: number_density = n(fishcast, z)
    else: number_density = fishcast.experiment.n[zbin_index]
    diagonal_values = prefactor * (fishcast.P_fid[zbin_index] + 1./number_density)**2.
-   return np.diag(diagonal_values)
+   #return np.diag(diagonal_values)
+   return diagonal_values
 
 
 def Muv(fishcast, z):
