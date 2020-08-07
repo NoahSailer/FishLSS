@@ -6,7 +6,8 @@ class experiment(object):
    An object that contains all the information related to the experiment
    '''
 
-   def __init__(self, zmin=0.8, zmax=1.2, nbins=1, zedges=None, fsky=0.5, sigma_z=0.01, n=12., b=1.5, LBG=False, HI=False):
+   def __init__(self, zmin=0.8, zmax=1.2, nbins=1, zedges=None, fsky=0.5, sigma_z=0.0, n=12., b=1.5, 
+                LBG=False, HI=False, Halpha=False, ELG=False, custom_n=False, custom_b=False, N_w=1.5):
 
       self.zmin = zmin
       self.zmax = zmax
@@ -21,3 +22,8 @@ class experiment(object):
       else: self.b = lambda z: b + 0.*z
       self.LBG = LBG
       self.HI = HI
+      self.Halpha = Halpha
+      self.ELG = ELG
+      self.N_w = N_w
+      self.custom_n = custom_n
+      self.custom_b = custom_b
