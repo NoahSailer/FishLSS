@@ -14,7 +14,7 @@ from experiment import *
 from fisherForecast import *
 import sys
 from LPT.moment_expansion_fftw import MomentExpansion
-
+import scipy
 ##################################################################################
 # make plots prettier
 import matplotlib
@@ -40,4 +40,4 @@ matplotlib.rcParams['ytick.major.width'] = 3
 matplotlib.rcParams['xtick.minor.width'] = 1.5
 matplotlib.rcParams['ytick.minor.width'] = 1.5
 matplotlib.rcParams['axes.titlesize'] = 30
-matplotlib.rcParams['text.latex.preamble'] = [r'\usepackage{amsmath}']
+matplotlib.rcParams['text.latex.preamble'] = r'\usepackage{amsmath}'

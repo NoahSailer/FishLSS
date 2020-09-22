@@ -1,5 +1,7 @@
 from headers import *
 from twoPoint import *
+from castorina import castorinaBias,castorinaPn
+import scipy
 
 '''
 Values and defintions from Table 3 of Wilson and White 2019.
@@ -17,38 +19,37 @@ alpha = interp1d(zs, alpha, kind='linear', bounds_error=False, fill_value=0.)
 
 def compute_covariance_matrix(fishcast, zbin_index):
    '''
-   Returns a square array of linear dimension Nk*Nmu. 
+   Covariance is diagonal. Returns an array of length Nk*Nmu. 
    '''
    z = fishcast.experiment.zcenters[zbin_index]
    prefactor = (4.*np.pi**2.) / (fishcast.dk*fishcast.dmu*fishcast.Vsurvey[zbin_index]*fishcast.k**2.)
-   if fishcast.experiment.HI: 
-      pn = compute_tracer_power_spectrum(fishcast, z)
-      diagonal_values = prefactor * pn**2.
-      return diagonal_values
    number_density = compute_n(fishcast, z)
-   diagonal_values = prefactor * (fishcast.P_fid[zbin_index] + 1./number_density)**2.
-   #return np.diag(diagonal_values)
-   return diagonal_values
+   # The number density is effectively reduced if there are redshift uncertainties
+   Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
+   sigma_parallel = (3.e5)*(1.+z)*fishcast.experiment.sigma_z/Hz
+   number_density = number_density * np.maximum(np.exp(-fishcast.k**2. * fishcast.mu**2. * sigma_parallel**2.),1.e-20)
+   return prefactor * (fishcast.P_fid[zbin_index] + 1./number_density)**2.
 
 
 def compute_n(fishcast, z):
+   '''
+   Returns the relevant number density h^3/Mpc^3. For HI surveys
+   returns an array of length Nk*Nmu, for all other surveys
+   return a float.
+   '''
    if fishcast.experiment.LBG and not fishcast.experiment.custom_n: return LBGn(fishcast, z)
    if fishcast.experiment.Halpha and not fishcast.experiment.custom_n: return hAlphaN(fishcast, z)
    if fishcast.experiment.ELG and not fishcast.experiment.custom_n: return ELGn(fishcast, z)
-   loc = np.where(fishcast.experiment.zcenters >= z)[0]
-   if len(loc) == 0:
-      if z > fishcast.experiment.zedges[-1]: 
-         print('Tried to interpolate outside of specified redshift range')
-         return
-      else:
-         return fishcast.experiment.n[-1]
-   return fishcast.experiment.n[loc[0]]  
-
-def Muv(fishcast, z):
+   if fishcast.experiment.HI and not fishcast.experiment.custom_n: return HIneff(fishcast,z)
+   if fishcast.experiment.Euclid and not fishcast.experiment.custom_n: return Euclidn(z)
+   return fishcast.experiment.n(z)
+    
+    
+def Muv(fishcast, z, m=24.5):
    '''
-   Equation 2.6 of Wilson and White 2019.
+   Equation 2.6 of Wilson and White 2019. Assumes a m=24.5 limit
    '''
-   result = muv(z) - 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*1.e5)
+   result = m - 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*1.e5)
    result += 2.5 * np.log10(1.+z)
    return result
 
@@ -58,15 +59,16 @@ def LBGn(fishcast, z):
    Equation 2.5 of Wilson and White 2019. Return number
    density of LBGs at redshift z in units of Mpc^3/h^3.
    '''
-   result = (np.log(10.)/2.5) * phi(z)
-   result *= 10.**( -0.4 * (1.+alpha(z)) * (Muv(fishcast,z)-Muvstar(z)) )
-   result *= np.exp(-10.**(-0.4 * (Muv(fishcast,z)-Muvstar(z)) ) )
-   return result
+   upper_limit = Muv(fishcast,z)
+   integrand = lambda M: (np.log(10.)/2.5) * phi(z) * 10.**( -0.4 * (1.+alpha(z)) * (M-Muvstar(z)) )*\
+                             np.exp(-10.**(-0.4 * (M-Muvstar(z)) ) )
+   
+   return scipy.integrate.quad(integrand, -200, upper_limit)[0]
 
 
 def ELGn(fishcast, z):
    zs = np.array([0.65,0.75,0.85,0.95,1.05,1.15,1.25,1.35,1.45,1.55,1.65])
-   dNdz = np.array([45,290,190,205,135,125,130,55,50,40,15])*10.
+   dNdz = np.array([309,2269,1923,2094,1441,1353,1337,523,466,329,126])
    N = 41252.96125 * dNdz * 0.1 # number of emitters in dz=0.1 across the whole sky
    volume = np.array([((1.+z+0.05)*fishcast.cosmo.angular_distance(z+0.05))**3. for z in zs])
    volume -= np.array([((1.+z-0.05)*fishcast.cosmo.angular_distance(z-0.05))**3. for z in zs])
@@ -77,7 +79,16 @@ def ELGn(fishcast, z):
    n = n + [n[-1]]
    n = np.array(n)
    n_interp = interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)
-   return n_interp(z)
+   return float(n_interp(z))
+
+
+def Euclidn(z):
+   '''
+   From Table 3 of https://arxiv.org/pdf/1606.00180.pdf.
+   '''
+   zs = np.array([0.7,0.8,0.9,1,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0])
+   n = np.array([1.25,1.92,1.83,1.68,1.51,1.35,1.20,1.00,0.80,0.58,0.38,0.35,0.21,0.11])*1e-3
+   return interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)(z)
 
 
 def hAlphaN(fishcast, z):
@@ -97,3 +108,73 @@ def hAlphaN(fishcast, z):
    n = np.array(n)
    n_interp = interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)
    return n_interp(z)
+
+
+def nofl(x, hexpack=True, Nside=256, D=6):
+   '''
+   Adapted from https://github.com/slosar/PUMANoise.
+   Helper function for puma_therm. Returns baseline 
+   density.
+   '''
+   # quadratic packing
+   if hexpack:
+      # hexagonal packing
+      a,b,c,d,e=0.56981864, -0.52741196,  0.8358006 ,  1.66354748,  7.31776875
+   else:
+      # square packing
+      a,b,d,d,e=0.4847, -0.330,  1.3157,  1.5975,  6.8390
+   xn=x/(Nside*D)
+   n0=(Nside/D)**2
+   res=n0*(a+b*xn)/(1+c*xn**d)*np.exp(-(xn)**e)
+   return res
+
+
+def puma_therm(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6, 
+           skycoupling=0.9, Tground=300., omtcoupling=0.9, Tampl=50., 
+           ttotal=5*365*24*3600./4.):
+   '''
+   Adapted from https://github.com/slosar/PUMANoise.
+   Thermal noise power in Mpc^3/h^3. Thermal noise is 
+   given by equation D4 in https://arxiv.org/pdf/1810.09572.
+   I divide by Tb (equation B1) to convert to Mpc^3/h^3.
+   Returns a function of k [h/Mpc] and mu.
+   '''
+   Nside = np.sqrt(2.*fishcast.experiment.Ndetectors)
+   Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h'] # in h km/s/Mpc
+   Ez = fishcast.cosmo.Hubble(z)/fishcast.cosmo.Hubble(0)
+   lam = 0.211 * (1+z) 
+   r = (1.+z) * fishcast.cosmo.angular_distance(z)*fishcast.params['h'] # in Mpc/h
+   Deff = D * np.sqrt(effic) 
+   FOV = (lam / Deff)**2 
+   y = 3e5*(1+z)**2/(1420e6*Hz)
+   Ohi = 4e-4*(1+z)**0.6 
+   Sarea=4*np.pi*fishcast.experiment.fsky 
+   Ae=np.pi/4*D**2*effic
+   # k dependent terms
+   kperp = lambda k,mu: k*np.sqrt(1.-mu**2.)
+   l = lambda k,mu: kperp(k,mu) * r * lam / (2 * np.pi) 
+   Nu = lambda k,mu: nofl(l(k,mu),hexpack=hexpack,Nside=Nside,D=D)*lam**2
+   # temperatures
+   Tb = 188e-3*(fishcast.params['h'])/Ez*Ohi*(1+z)**2 
+   Tsky = lambda f: 25.*(f/400.)**(-2.75) +2.7
+   Tscope = Tampl/omtcoupling/skycoupling+Tground*(1-skycoupling)/skycoupling
+   Tsys = Tsky(1420./(1+z))+Tscope
+   Pn = lambda k,mu: (Tsys/Tb)**2*r**2*y*(lam**4/Ae**2)*1/(2*Nu(k,mu)*ttotal)*(Sarea/FOV)
+   return Pn
+
+
+def puma_shot(z): 
+   '''
+   PUMA shot noise Mpc^3/h^3 from Emanuele Castorina.
+   '''
+   return castorinaPn(z)
+
+
+def HIneff(fishcast,z):
+   '''
+   Effective number density for PUMA. Returns
+   an array of length Nk*Nmu.
+   '''
+   therm = puma_therm(fishcast,z)(fishcast.k,fishcast.mu)
+   shot = puma_shot(z)
+   return 1./(therm+shot)

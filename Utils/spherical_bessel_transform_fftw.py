@@ -49,12 +49,17 @@ class SphericalBesselTransform:
         if import_wisdom:
             pyfftw.import_wisdom(tuple(np.load(wisdom_file)))
         
+        #flags = ('FFTW_DESTROY_INPUT','FFTW_MEASURE')
+        
         self.fks = pyfftw.empty_aligned((self.ncol,self.N//2 + 1), dtype='complex128')
         self.fs  = pyfftw.empty_aligned((self.ncol,self.N), dtype='float64')
         
+        self.gks = pyfftw.empty_aligned((self.ncol,self.N//2 + 1), dtype='complex128')
+        self.gs  = pyfftw.empty_aligned((self.ncol,self.N), dtype='float64')
+        
         pyfftw.config.NUM_THREADS = threads
         self.fft_object = pyfftw.FFTW(self.fs, self.fks, direction='FFTW_FORWARD',threads=threads)
-        self.ifft_object = pyfftw.FFTW(self.fks, self.fs, direction='FFTW_BACKWARD',threads=threads)
+        self.ifft_object = pyfftw.FFTW(self.gks, self.gs, direction='FFTW_BACKWARD',threads=threads)
         
         # Set up the FFTLog kernels u_m up to, but not including, L
         ms = np.arange(0, self.N//2+1)
@@ -90,10 +95,11 @@ class SphericalBesselTransform:
         The workhorse of the class. Spherical Hankel Transforms fq on coordinates self.q.
         '''
         q = self.qdict[nu]; y = self.ydict[nu]
+        self.fs[:] = 0 # on NERSC this seems necessary or this variable spills over from previous calls
         self.fs[:,self.Npad - self.Npad//2 : self.N - self.Npad//2] = fq * self.q**(3-q)
         
         fks = self.fft_object()
-        self.fks[:] = np.conj(fks * self.udict[nu])
+        self.gks[:] = np.conj(fks * self.udict[nu])
         gs = self.ifft_object()
 
         return y, gs[:,self.ii_l:self.ii_r] * y**(-q)

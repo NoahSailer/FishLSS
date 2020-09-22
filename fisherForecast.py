@@ -17,7 +17,7 @@ class fisherForecast(object):
                 Nmu=50, Nk=50, params=None, marg_params=np.array(['A_s','h']),
                 fEDE=0., log10z_c=3.56207, thetai_scf=2.83, A_lin=0., 
                 omega_lin=0.01, phi_lin=np.pi/2., velocileptors=False,
-                linear=False, name='toy_model'):
+                linear=False, name='toy_model',smooth=False):
       self.khmin = khmin
       self.khmax = khmax
       self.Nmu = Nmu
@@ -34,6 +34,7 @@ class fisherForecast(object):
       self.velocileptors = velocileptors
       self.linear = linear
       self.name = name
+      self.smooth = smooth
 
       self.experiment = None
       self.cosmo = None
@@ -49,8 +50,8 @@ class fisherForecast(object):
          print('Attempted to create a forecast without an experiment or cosmology.')     
       else:
          self.set_experiment_and_cosmology_specific_parameters(experiment,cosmo,params)
-
-
+           
+        
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, params):
       self.experiment = experiment
       self.cosmo = cosmo
@@ -84,6 +85,7 @@ class fisherForecast(object):
       '''
       Returns the comoving volume in Mpc^3/h^3 between 
       zmin and zmax assuming that the universe is flat.
+      Includes the fsky of the experiment.
       '''
       vsmall = (4*np.pi/3) * ((1.+zmin)*self.cosmo.angular_distance(zmin))**3.
       vbig = (4*np.pi/3) * ((1.+zmax)*self.cosmo.angular_distance(zmax))**3.
@@ -98,7 +100,7 @@ class fisherForecast(object):
       cosmology and redshift (for the respective bin). Returns
       an array of length Nk*Nmu.
       '''
-      default_step = {'log(A_s)':0.1,'A_s':0.1,'omega_cdm':0.2,'n_s':0.1,'tau_reio':0.3,'m_ncdm':0.1}
+      default_step = {'log(A_s)':0.1,'A_s':0.1,'omega_cdm':0.2,'n_s':0.1,'tau_reio':0.3,'m_ncdm':0.05}
         
       if relative_step == -1.: 
          try: relative_step = default_step[param]
@@ -108,29 +110,43 @@ class fisherForecast(object):
          except: absolute_step = 0.01
     
       P_fid = compute_tracer_power_spectrum(self,z)
-             
-      # NON-CLASS INPUTS
-      flag = False 
-      if param == 'log(A_s)' : 
-         flag = True
-         param = 'A_s'
+               
+      if param == 'N' : return np.ones(len(self.k))
         
       if param == 'Tb': 
          Ez = fishcast.cosmo.Hubble(z)/fishcast.cosmo.Hubble(0)
          Ohi = 4e-4*(1+z)**0.6
          Tb = 188e-3*(fishcast.params['h'])/Ez*Ohi*(1+z)**2
-         return 2. * ( P_fid - PNoise(self, z)(self.k,self.mu) + castorinaPn(z)(self.k,self.mu) ) / Tb
-       
-      if param == 'N' : return np.ones(len(self.k))
+         return 2. * ( P_fid + castorinaPn(z)(self.k,self.mu) ) / Tb
     
+      def dPdk(): 
+         dP = P_fid - np.roll(P_fid,self.Nmu)
+         dk = self.k - np.roll(self.k,self.Nmu)
+         return dP/dk
+      
+      def dPdmu():
+          def dPdmu_fixed_k(i): 
+             dP = P_fid[self.Nmu*i:self.Nmu*(i+1)] - np.roll(P_fid[self.Nmu*i:self.Nmu*(i+1)],1)
+             dmu = self.dmu[0]
+             dPdmu = dP/dmu
+             dPdmu[0] = 0.
+             return list(dPdmu)
+          result = dPdmu_fixed_k(0)
+          for i in range(1,self.Nk): result = result + dPdmu_fixed_k(i)
+          return np.array(result)
+          
       if param == 'Da': 
-         if self.experiment.HI: return -2.*(P_fid - PNoise(self, z)(self.k,self.mu))/self.cosmo.angular_distance(z)
-         return -2.*P_fid/self.cosmo.angular_distance(z)
+         K,MU = self.k,self.mu
+         result = -2.*P_fid + K*(1.-MU**2.)*dPdk() - MU*(1.-MU**2.)*dPdmu()
+         return result/(self.cosmo.angular_distance(z) * self.params['h']) 
         
       if param == 'Hz':
+         K,MU = self.k,self.mu
+         result = P_fid - K*MU**2.*dPdk() - MU*(1.-MU**2.)*dPdmu()
          Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h']
-         if self.experiment.HI: return (P_fid-PNoise(self,z)(self.k,self.mu))/Hz
-         return P_fid/Hz
+         return result/Hz
+        
+      # This list is getting ugly and somewhat out of hand. This should be coded up more cleverly...
     
       if param == 'A_lin': 
          P_dummy_hi = compute_tracer_power_spectrum(self,z,A_lin=self.A_lin+absolute_step)
@@ -164,6 +180,43 @@ class fisherForecast(object):
          P_dummy_lower = compute_tracer_power_spectrum(self,z,bE2=-2.*absolute_step)
          return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
         
+      if param == 'bs':
+         P_dummy_hi = compute_tracer_power_spectrum(self,z,bEs=absolute_step)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z,bEs=2.*absolute_step)
+         P_dummy_low = compute_tracer_power_spectrum(self,z,bEs=-absolute_step)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z,bEs=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+      
+      if param == 'alpha0':
+         P_dummy_hi = compute_tracer_power_spectrum(self,z,alpha0=absolute_step)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z,alpha0=2.*absolute_step)
+         P_dummy_low = compute_tracer_power_spectrum(self,z,alpha0=-absolute_step)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z,alpha0=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+      
+      if param == 'alpha2':
+         # Strange factor of -1 here...
+         P_dummy_hi = compute_tracer_power_spectrum(self,z,alpha2=absolute_step)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z,alpha2=2.*absolute_step)
+         P_dummy_low = compute_tracer_power_spectrum(self,z,alpha2=-absolute_step)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z,alpha2=-2.*absolute_step)
+         return -1.*(-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+      
+      if param == 'alpha4':
+         P_dummy_hi = compute_tracer_power_spectrum(self,z,alpha4=absolute_step)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z,alpha4=2.*absolute_step)
+         P_dummy_low = compute_tracer_power_spectrum(self,z,alpha4=-absolute_step)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z,alpha4=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+        
+      if param == 'sn2':
+         # Strange factor of -1 here...
+         P_dummy_hi = compute_tracer_power_spectrum(self,z,sn2=10.)
+         P_dummy_higher = compute_tracer_power_spectrum(self,z,sn2=20.)
+         P_dummy_low = compute_tracer_power_spectrum(self,z,sn2=-10.)
+         P_dummy_lower = compute_tracer_power_spectrum(self,z,sn2=-20.)
+         return -1.*(-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * 10.)
+        
       if param == 'b' or param == 'f_NL' or param == 'f_NL_eq' or param == 'f_NL_orth': 
          b_fid = compute_b(self,z)
          P_dummy_hi = compute_tracer_power_spectrum(self,z,b=b_fid*(1.+relative_step))
@@ -175,13 +228,13 @@ class fisherForecast(object):
          # derivative wrt f_NL
          D = 0.76 * self.cosmo.scale_independent_growth_factor(z) # normalized so D(a) = a in the MD era
          # hacky way of calculating the transfer function
-         pmatter = compute_matter_power_spectrum(self, z, linear=False)
+         pmatter = compute_matter_power_spectrum(self, z, linear=True)
          T = np.sqrt(pmatter/self.k**self.params['n_s'])
          T /= T[0]
          fNL_factor = 3.*1.68*(b_fid-1.)*(self.params['omega_cdm']/self.params['h']**2.)*100.**2.
          fNL_factor /= D * self.k**2. * T * 299792.458**2.
-         if param == 'f_NL_eq': fNL_factor *= 3. * (3.7*self.k)**2.
-         if param == 'f_NL_orth': fNL_factor *= -3. * (3.7*self.k)
+         if param == 'f_NL_eq': fNL_factor *= 3. * (1.*self.k)**2.
+         if param == 'f_NL_orth': fNL_factor *= -3. * (1.*self.k)
          return dPdb * fNL_factor
             
       # derivative of early dark energy parameters (Hill+2020)
@@ -196,31 +249,53 @@ class fisherForecast(object):
          P_dummy_hi = compute_tracer_power_spectrum(self,z)
          self.cosmo.set({'fEDE':2.*absolute_step})
          self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(self,z)
+         P_dummy_hi2 = compute_tracer_power_spectrum(self,z)
+         self.cosmo.set({'fEDE':3.*absolute_step})
+         self.cosmo.compute()
+         P_dummy_hi3 = compute_tracer_power_spectrum(self,z)
+         self.cosmo.set({'fEDE':4.*absolute_step})
+         self.cosmo.compute()
+         P_dummy_hi4 = compute_tracer_power_spectrum(self,z)
          self.cosmo = Class()
          self.cosmo.set(self.params)
-         self.cosmo.compute()
-         return (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * absolute_step)
+         self.cosmo.compute() 
+         return (-3.*P_dummy_hi4 + 16.*P_dummy_hi3 - 36.*P_dummy_hi2 + 48.*P_dummy_hi - 25.*P_fid)/(12.*absolute_step)
       
       if (param == 'log10z_c' or param == 'thetai_scf') and self.fEDE == 0.:
          print('Attempted to marginalize over log10z_c or thetai_scf when fEDE has a fiducial value of 0.')
          return
     
       result = np.zeros(len(self.k))
-        
-      # brute force numerical differentiation
-      default_value = self.params[param]
       
-      up = default_value * (1. + relative_step)
-      if default_value == 0.: up = default_value + absolute_step
-      upup = default_value * (1. + 2.*relative_step)
-      if default_value == 0.: upup = default_value + 2.*absolute_step
-      down = default_value * (1. - relative_step)
-      if default_value == 0.: down = default_value - absolute_step
-      downdown = default_value * (1. - 2.*relative_step)
-      if default_value == 0.: downdown = default_value - 2.*absolute_step
-      step = default_value * relative_step
-      if default_value == 0.: step = absolute_step
+      # brute force numerical differentiation
+      flag = False 
+      if param == 'log(A_s)' : 
+         flag = True
+         param = 'A_s'  
+        
+      default_value = self.params[param] 
+        
+      if param == 'm_ncdm' and self.params['N_ncdm']>1:
+         # CLASS takes a string as an input when there is more than one massless neutrino
+         default_value_float = np.array(list(map(float,list(default_value.split(',')))))
+         Mnu = sum(default_value_float)
+         up = ','.join(list(map(str,list(default_value_float+relative_step*Mnu/self.params['N_ncdm']))))
+         upup = ','.join(list(map(str,list(default_value_float+2.*relative_step*Mnu/self.params['N_ncdm']))))
+         down = ','.join(list(map(str,list(default_value_float-relative_step*Mnu/self.params['N_ncdm']))))
+         downdown = ','.join(list(map(str,list(default_value_float-2.*relative_step*Mnu/self.params['N_ncdm']))))
+         step = Mnu*relative_step
+      else:
+         up = default_value * (1. + relative_step)
+         if default_value == 0.: up = default_value + absolute_step
+         upup = default_value * (1. + 2.*relative_step)
+         if default_value == 0.: upup = default_value + 2.*absolute_step
+         down = default_value * (1. - relative_step)
+         if default_value == 0.: down = default_value - absolute_step
+         downdown = default_value * (1. - 2.*relative_step)
+         if default_value == 0.: downdown = default_value - 2.*absolute_step
+         step = default_value * relative_step
+         if default_value == 0.: step = absolute_step
+            
     
       def set_param(value):
          self.cosmo.set({param : value})
@@ -275,10 +350,10 @@ class fisherForecast(object):
    def Sigma2(self, z): return sum(compute_matter_power_spectrum(self,z,linear=True)*self.dk*self.dmu) / (6.*np.pi**2.)
 
     
-   def kmax_constraint(self, z): return self.k < 1./np.sqrt(self.Sigma2(z))
+   def kmax_constraint(self, z, alpha=1.): return self.k < alpha/np.sqrt(self.Sigma2(z))
     
     
-   def compute_wedge(self, z, kparallel_min=0.01):
+   def compute_wedge(self, z):
       if not self.experiment.HI: return self.k > 0.008 # set this to be bigger than khmin to aoid edge effects with velocileptors
       #
       kparallel = self.k*self.mu
@@ -292,7 +367,7 @@ class fisherForecast(object):
       theta_w = self.experiment.N_w * 1.22 * lambda21 / (2.*D_eff)
       #
       wedge = kparallel > chi*Hz*np.sin(theta_w)*kperpendicular/(c*(1.+z))
-      kparallel_constraint = kparallel > kparallel_min
+      kparallel_constraint = kparallel > self.experiment.kparallel_min
       return wedge*kparallel_constraint
     
     
@@ -330,16 +405,18 @@ class fisherForecast(object):
             plt.show()
             plt.clf()
             print(file)
-                        
-   def gen_fisher(self,basis,log10z_c=-1.):
+                  
+                
+   def gen_fisher(self,basis,log10z_c=-1.,omega_lin=-1.,alpha=1.,zbin_indices=None):
       if log10z_c == -1. : log10z_c = self.log10z_c
+      if omega_lin == -1. : omega_lin = self.omega_lin
       def fish(zbin_index):
          n = len(basis)
          z = self.experiment.zcenters[zbin_index]
          dPdvecp = np.array([None]*n)
          for i,param in enumerate(basis): 
             if param == 'fEDE': filename = 'fEDE_'+str(int(1000.*log10z_c))+'_'+str(int(100*z))+'.txt'
-            elif param == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z))+'.txt'
+            elif param == 'A_lin': filename = 'A_lin_'+str(int(100.*omega_lin))+'_'+str(int(100*z))+'.txt'
             else: filename = param+'_'+str(int(100*z))+'.txt'
             try:
                dPdvecp[i] = np.genfromtxt('output/'+self.name+'/derivatives/'+filename)
@@ -350,8 +427,9 @@ class fisherForecast(object):
          Cinv = 1./self.get_covariance_matrix(zbin_index)
          for i in range(n):
             for j in range(n):
-               F[i,j] = np.sum(dPdvecp[i]*Cinv*dPdvecp[j]*self.compute_wedge(z)*self.kmax_constraint(z))
+               F[i,j] = np.sum(dPdvecp[i]*Cinv*dPdvecp[j]*self.compute_wedge(z)*self.kmax_constraint(z,alpha))
          return F
+      if zbin_indices is not None: return sum([fish(i) for i in zbin_indices])
       result = fish(0)
       for i in range(1,len(self.experiment.zedges)-1): result+=fish(i)
       return result
@@ -452,9 +530,9 @@ class fisherForecast(object):
          K,MU,b = self.k,self.mu,compute_b(self,z)
          P_L = compute_matter_power_spectrum(self,z,linear=True) * (b+f*MU**2.)**2.
          P_F = compute_tracer_power_spectrum(self,z)
-         if not self.experiment.HI: P_F += 1./compute_n(self,z)
+         P_F += 1./compute_n(self,z)
          integrand = ( G(z)**2. * P_L / P_F )**2. 
-         integrand *= self.compute_wedge(z) #CHANGE THIS SO THAT EVERYTHING IS MULTIPLIED BY A WEDGE
+         integrand *= self.compute_wedge(z) 
          if kpar > 0.: integrand *= (self.k*self.mu > kpar)
          return sum(integrand * self.k**2. * self.dk * self.dmu / (2. * np.pi**2.))
     
@@ -462,7 +540,7 @@ class fisherForecast(object):
       zs = (zedges[1:]+zedges[:-1])/2.
       dV = np.array([self.comov_vol(zedges[i],zedges[i+1]) for i in range(nbins)])
       I = np.array([I1(z) for z in zs])
-      return sum(I*dV*self.experiment.fsky)
+      return sum(I*dV) 
       
     
    

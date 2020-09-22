@@ -1,6 +1,8 @@
 from headers import *
-from castorina import castorinaBias,castorinaPn
 from LPT.moment_expansion_fftw import MomentExpansion
+from scipy.signal import savgol_filter
+from castorina import castorinaBias,castorinaPn
+from twoPointNoise import *
 
 def compute_matter_power_spectrum(fishcast, z, linear=False):
    '''
@@ -16,7 +18,7 @@ def compute_matter_power_spectrum(fishcast, z, linear=False):
    return np.repeat(pmatter,fishcast.Nmu)
 
 
-def LBGb(z):
+def LBGb(fishcast,z):
    '''
    Equation 2.7 of Wilson and White 2019. Returns the bias of
    LBGs.
@@ -26,10 +28,16 @@ def LBGb(z):
    muv = interp1d(zs, muv, kind='linear', bounds_error=False, fill_value=0.)
    A = lambda m: -0.98*(m-25.) + 0.11
    B = lambda m: 0.12*(m-25.) + 0.17
-   m = 25.
-   # below I assume a constant limiting maginitude m -25, could
-   # in general be replaced with some m(z)
-   return A(m)*(1.+z)+B(m)*(1.+z)**2.
+   def b(m): return A(m)*(1.+z)+B(m)*(1.+z)**2.
+   return b(24.5)
+   #def b(M): 
+   #   m = M + 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*1.e5) - 2.5 * np.log10(1.+z)
+   #   return A(m)*(1.+z)+B(m)*(1.+z)**2.
+   #upper_limit = Muv(fishcast,z)
+   #integrand = lambda M: (np.log(10.)/2.5) * phi(z) * 10.**( -0.4 * (1.+alpha(z)) * (M-Muvstar(z)) )*\
+   #                          np.exp(-10.**(-0.4 * (M-Muvstar(z)) ) )
+   #weighted_bias = lambda M: integrand(M) * b(M)
+   #return scipy.integrate.quad(weighted_bias, -200, upper_limit)[0]/scipy.integrate.quad(integrand, -200, upper_limit)[0]
 
 
 def hAlphaB(z):
@@ -46,75 +54,10 @@ def ELGb(fishcast,z):
    D = fishcast.cosmo.scale_independent_growth_factor(z)
    return 0.84/D
 
-def nofl(x, hexpack=True, Nside=256, D=6):
-   '''
-   Adapted from https://github.com/slosar/PUMANoise.
-   Returns baseline density
-   '''
-   # quadratic packing
-   if hexpack:
-      # square packing
-      a,b,B,C,D=0.4847, -0.330,  1.3157,  1.5975,  6.8390
-   else:
-      # hexagonal packing
-      a,b,B,C,D=0.56981864, -0.52741196,  0.8358006 ,  1.66354748,  7.31776875
-   xn=x/(Nside*D)
-   n0=(Nside/D)**2
-   res=n0*(a+b*xn)/(1+B*xn**C)*np.exp(-(xn)**D)
-   if (type(res)==np.ndarray): res[res<1e-10] = 1e-10
-   return res
 
+def HIb(z): return castorinaBias(z)
 
-def PNoise(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6, 
-           skycoupling=0.9, Tground=300., omtcoupling=0.9, Tampl=50., 
-           ttotal=5*365*24*3600.):
-   '''
-   Adapted from https://github.com/slosar/PUMANoise.
-   Thermal + shot noise power in Mpc^3/h^3. Thermal noise is 
-   given by equation D4 in https://arxiv.org/pdf/1810.09572.
-   I divide by Tb (equation B1) to convert to Mpc^3/h^3.
-   Returns a function of k and mu.
-   '''
-   Hz = fishcast.cosmo.Hubble(z)*(299792.458)
-   Ez = fishcast.cosmo.Hubble(z)/fishcast.cosmo.Hubble(0)
-   lam = 0.21 * (1+z)
-   r = (1.+z) * fishcast.cosmo.angular_distance(z)
-   Deff = D * np.sqrt(effic)
-   FOV = (lam / Deff)**2
-   y = 3e5*(1+z)**2/(1420e6*Hz)
-   Ohi = 4e-4*(1+z)**0.6
-   Sarea=4*np.pi*fishcast.experiment.fsky
-   Ae=np.pi/4*D**2*effic
-   # k dependent terms
-   kperp = lambda k,mu: fishcast.params['h']*k*np.sqrt(1.-mu**2.)
-   l = lambda k,mu: kperp(k,mu) * r * lam / (2 * np.pi)
-   Nu = lambda k,mu: nofl(l(k,mu),hexpack=hexpack,Nside=Nside,D=D)*lam**2
-   # temperatures
-   Tb = 188e-3*(fishcast.params['h'])/Ez*Ohi*(1+z)**2
-   Tsky = lambda f: 25.*(f/400.)**(-2.75) +2.75
-   Tscope = Tampl/omtcoupling/skycoupling+Tground*(1-skycoupling)/skycoupling
-   Tsys = Tsky(1420./(1+z))+Tscope
-   # noise and shot power spectra
-   Pn = lambda k,mu: (Tsys/Tb)**2*r**2*y*(lam**4/Ae**2)*1/(2*Nu(k,mu)*ttotal)*(Sarea/FOV)*fishcast.params['h']**3.
-   Pshot = castorinaPn(z)
-   return lambda k,mu: Pn(k,mu) + Pshot
-
-
-def HIb(z): 
-   #return castorinaBias(z)
-   # Table 1 of Chen 19
-   zs = np.array([2.,2.5,3.,3.5,4.,4.5,5.,5.5,6.])
-   b = np.array([1.88,2.08,2.3,2.54,2.81,3.11,3.42,3.74,4.06])
-   return interp1d(zs, b, kind='linear', bounds_error=False, fill_value=0.)(z)
-
-def HIneff(z):
-   # Table 1 of Chen 19
-   zs = np.array([2.,2.5,3.,3.5,4.,4.5,5.,5.5,6.])
-   n = np.array([13.,20.,28.,36.,44.,49.,53.,57.,59.])*0.001
-   return interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)(z)
-   
-
-
+    
 def compute_f(fishcast, z, step=0.01):
    '''
    Returns the logarithmic derivative of the linear growth rate. Calculated
@@ -127,19 +70,61 @@ def compute_f(fishcast, z, step=0.01):
    return -(1.+z) * dPdz / (2. * p_fid)
 
 
+
 def compute_b(fishcast,z):
-   if fishcast.experiment.LBG and not fishcast.experiment.custom_b: return LBGb(z)
+   if fishcast.experiment.LBG and not fishcast.experiment.custom_b: return LBGb(fishcast,z)
    if fishcast.experiment.HI and not fishcast.experiment.custom_b: return HIb(z)
    if fishcast.experiment.Halpha and not fishcast.experiment.custom_b: return hAlphaB(z)
    if fishcast.experiment.ELG and not fishcast.experiment.custom_b: return ELGb(fishcast,z)
+   if fishcast.experiment.Euclid and not fishcast.experiment.custom_b: return np.sqrt(1+z)
    return fishcast.experiment.b(z)
 
 
-def compute_tracer_power_spectrum(fishcast, z, b=-1., bE2=0., f=-1., A_lin=-1., omega_lin=-1., phi_lin=-1.):
+def get_smoothed_p(fishcast,z,division_factor=2.):
    '''
-   Computes the nonlinear power spectrum of the matter tracer assuming a linear
-   bias parameter b. Returns a function of k [h/Mpc] and mu. For HI surverys
-   returns the HI power spectrum + noise (thermal + shot).
+   Returns a power spectrum without wiggles, given by:
+      P_nw = P_approx * F[P/P_approx]
+   where P is the linear power spectrum, P_approx is given by Eisenstein & Hu (1998),
+   and F is an SG low-pass filter.
+   '''
+   def Peh(k,p):
+      '''
+      Returns the smoothed power spectrum Eisenstein & Hu (1998).
+      '''
+      k = k.copy() * fishcast.params['h']
+      Obh2      = fishcast.params['omega_b'] 
+      Omh2      = fishcast.params['omega_b'] + fishcast.params['omega_cdm']
+      f_baryon  = Obh2 / Omh2
+      theta_cmb = fishcast.cosmo.T_cmb() / 2.7
+      k_eq = 0.0746 * Omh2 * theta_cmb ** (-2)
+      sound_horizon = fishcast.params['h'] * 44.5 * np.log(9.83/Omh2) / \
+                            np.sqrt(1 + 10 * Obh2** 0.75) 
+      alpha_gamma = 1 - 0.328 * np.log(431*Omh2) * f_baryon + \
+                0.38* np.log(22.3*Omh2) * f_baryon ** 2
+      ks = k * sound_horizon / fishcast.params['h']
+      q = k / (13.41*k_eq)
+      gamma_eff = Omh2 * (alpha_gamma + (1 - alpha_gamma) / (1 + (0.43*ks) ** 4))
+      q_eff = q * Omh2 / gamma_eff
+      L0 = np.log(2*np.e + 1.8 * q_eff)
+      C0 = 14.2 + 731.0 / (1 + 62.5 * q_eff)
+      Teh = L0 / (L0 + C0 * q_eff**2)
+      t_with_wiggles = np.sqrt(p/k**fishcast.params['n_s'])
+      t_with_wiggles /= t_with_wiggles[0]
+      return p * (Teh/t_with_wiggles)**2.
+    
+   klin = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),int(fishcast.Nk))
+   plin = np.array([fishcast.cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+   p_approx = Peh(klin,plin)
+   psmooth = savgol_filter(plin/p_approx,int(fishcast.Nk/division_factor)+1-\
+                                         int(fishcast.Nk/division_factor)%2, 6)*p_approx
+   return psmooth
+
+
+def compute_tracer_power_spectrum(fishcast, z, b=-1., bE2=0., bEs=0., alpha0=0., alpha2=0., alpha4=0.,
+                                  sn=0.,sn2=0.,f=-1., A_lin=-1., omega_lin=-1., phi_lin=-1.):
+   '''
+   Computes the nonlinear redshift-space power spectrum [Mpc/h]^3 of the matter tracer.
+   Returns an array of length Nk*Nmu. 
    '''
    if b == -1.: b = compute_b(fishcast,z)
    if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
@@ -149,31 +134,28 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., bE2=0., f=-1., A_lin=-1., 
 
    K,MU = fishcast.k,fishcast.mu
 
-   Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
-   sigma_parallel = (3.e5)*(1.+z)*fishcast.experiment.sigma_z/Hz
-
    if not fishcast.velocileptors:
       # If not using velocileptors, estimate the non-linear evolution
       # using Halofit, and approximate RSD with Kaiser.
       pmatter = compute_matter_power_spectrum(fishcast, z, linear=fishcast.linear)
-      result = pmatter * np.exp(-(K*MU*sigma_parallel)**2.) * (b+f*MU**2.)**2. * (1. + A_lin * np.sin(omega_lin * K + phi_lin))
-      if fishcast.experiment.HI: result += PNoise(fishcast, z)(K,MU)
+      result = pmatter * (b+f*MU**2.)**2. * (1. + A_lin * np.sin(omega_lin * K + phi_lin))
       return result
 
    klin = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),fishcast.Nk)
-   plin = np.array([fishcast.cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+   plin = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
    plin *= (1. + A_lin * np.sin(omega_lin * klin + phi_lin))
+   if fishcast.smooth: plin = get_smoothed_p(fishcast,z)
    mome = MomentExpansion(klin,plin,kmin=fishcast.khmin,kmax=fishcast.khmax,nk=fishcast.Nk)
    b1 = b-1.
-   b2 = bE2-8.*b1/21.
-   bs = 2.*b1/7.
-   b3 = -b1/3.
-   biases = [b1,b2,bs,b3]
-   cterms = [0.,0.,0.]
-   stoch  = [0.,0.]
+   b2 = bE2
+   bs = bEs
+   alpha0_fid = 0.5 + 0.3*b**2*(1./fishcast.cosmo.scale_independent_growth_factor(z)\
+                               -1./fishcast.cosmo.scale_independent_growth_factor(5.8))
+   Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
+   biases = [b1,b2,bs,0.]
+   cterms = [alpha0+alpha0_fid,alpha2,alpha4]
+   stoch  = [sn,sn2+((1+z)*300/Hz)**2.]
    pars   = biases + cterms + stoch
    kw,pkw = mome.compute_redshift_space_power_at_mu(pars,f,fishcast.mu,reduced=True,Nmu=fishcast.Nmu)
    del mome
-   pkw *= np.exp(-(K*MU*sigma_parallel)**2.)
-   if fishcast.experiment.HI: pkw += PNoise(fishcast, z)(K,MU)
    return pkw
