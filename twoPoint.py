@@ -55,6 +55,12 @@ def ELGb(fishcast,z):
    return 0.84/D
 
 
+def MSEb(fishcast,z):
+   D = fishcast.cosmo.scale_independent_growth_factor(z)
+   D0 = fishcast.cosmo.scale_independent_growth_factor(0)
+   return D0/D
+
+
 def HIb(z): return castorinaBias(z)
 
     
@@ -77,6 +83,7 @@ def compute_b(fishcast,z):
    if fishcast.experiment.Halpha and not fishcast.experiment.custom_b: return hAlphaB(z)
    if fishcast.experiment.ELG and not fishcast.experiment.custom_b: return ELGb(fishcast,z)
    if fishcast.experiment.Euclid and not fishcast.experiment.custom_b: return np.sqrt(1+z)
+   if fishcast.experiment.MSE and not fishcast.experiment.custom_b: return MSEb(fishcast,z)
    return fishcast.experiment.b(z)
 
 
@@ -126,36 +133,82 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., bE2=0., bEs=0., alpha0=0.,
    Computes the nonlinear redshift-space power spectrum [Mpc/h]^3 of the matter tracer.
    Returns an array of length Nk*Nmu. 
    '''
-   if b == -1.: b = compute_b(fishcast,z)
+   bfid = compute_b(fishcast,z)
+   if b == -1.: b = bfid
    if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
    if A_lin == -1.: A_lin = fishcast.A_lin
    if omega_lin == -1.: omega_lin = fishcast.omega_lin
    if phi_lin == -1.: phi_lin = fishcast.phi_lin
+    
+   # For AP effect 
+   ap0 = fishcast.cosmo.angular_distance(z)*fishcast.params['h'] / fishcast.Da_fid(z)
+   ap1 = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h'] / fishcast.Hz_fid(z)
 
    K,MU = fishcast.k,fishcast.mu
 
    if not fishcast.velocileptors:
       # If not using velocileptors, estimate the non-linear evolution
       # using Halofit, and approximate RSD with Kaiser.
+      # No AP effect here
       pmatter = compute_matter_power_spectrum(fishcast, z, linear=fishcast.linear)
       result = pmatter * (b+f*MU**2.)**2. * (1. + A_lin * np.sin(omega_lin * K + phi_lin))
       return result
+    
+   if fishcast.AP: 
+      ap_factor = np.sqrt(ap1**2 * fishcast.mu**2 + (1-fishcast.mu**2)/ap0**2)
+      kprime = fishcast.k*ap_factor
+      muprime = fishcast.mu*ap1/ap_factor
+      K,MU = kprime,muprime
 
-   klin = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),fishcast.Nk)
+   klin = np.logspace(np.log10(min(K)),np.log10(max(K)),fishcast.Nk)
    plin = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
    plin *= (1. + A_lin * np.sin(omega_lin * klin + phi_lin))
    if fishcast.smooth: plin = get_smoothed_p(fishcast,z)
-   mome = MomentExpansion(klin,plin,kmin=fishcast.khmin,kmax=fishcast.khmax,nk=fishcast.Nk)
+   mome = MomentExpansion(klin,plin,kmin=min(K),kmax=max(K),nk=fishcast.Nk)
    b1 = b-1.
-   b2 = bE2
-   bs = bEs
-   alpha0_fid = 0.5 + 0.3*b**2*(1./fishcast.cosmo.scale_independent_growth_factor(z)\
-                               -1./fishcast.cosmo.scale_independent_growth_factor(5.8))
+   b2 = bE2 + 8*(bfid-b)/21 # these factors keep b2 and bs fixed when varying b
+   bs = bEs - 2*(bfid-b)/7
+   alpha0_fid = 1.22 + 0.24*bfid**2*(z-5.96) 
    Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
    biases = [b1,b2,bs,0.]
    cterms = [alpha0+alpha0_fid,alpha2,alpha4]
-   stoch  = [sn,sn2+((1+z)*300/Hz)**2.]
+   noise = compute_n(fishcast,z)
+   if fishcast.experiment.HI: noise = noise[0]
+   # The velocileptors sn2 input adds a term ~ - 2 * sn2 * (k mu)^2 to the power spectrum. To
+   # correct for this strange factor of -2, I multiply my -0.5.
+   stoch  = [sn,-0.5*sn2-0.5*noise*((1+z)*300/Hz)**2.]
    pars   = biases + cterms + stoch
-   kw,pkw = mome.compute_redshift_space_power_at_mu(pars,f,fishcast.mu,reduced=True,Nmu=fishcast.Nmu)
+   kw,pkw = mome.compute_redshift_space_power_at_mu(pars,f,MU,reduced=True,Nmu=fishcast.Nmu)
    del mome
+   # pkw is the redshift-space non-linear power spectrum of the matter tracer
+   if fishcast.AP: return ap1*pkw/ap0**2
    return pkw
+
+
+#def compute_recon_power_spectrum(fishcast, z, b=-1., bE2=0., bEs=0., alpha0=0., alpha2=0., alpha4=0.,
+#                                  sn=0.,sn2=0.,f=-1.):
+#   bfid = compute_b(fishcast,z)
+#   if b == -1.: b = bfid
+#   if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
+#    
+#   # For AP effect 
+#   ap0 = fishcast.cosmo.angular_distance(z)*fishcast.params['h'] / fishcast.Da_fid(z)
+#   ap1 = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h'] / fishcast.Hz_fid(z)
+#
+#   K,MU = fishcast.k,fishcast.mu
+#    
+#   if fishcast.AP: 
+#      ap_factor = np.sqrt(ap1**2 * fishcast.mu**2 + (1-fishcast.mu**2)/ap0**2)
+#      kprime = fishcast.k*ap_factor
+#      muprime = fishcast.mu*ap1/ap_factor
+#      K,MU = kprime,muprime
+#
+#   klin = np.logspace(np.log10(min(K)),np.log10(max(K)),fishcast.Nk)
+#   plin = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+#    
+#   zelda = Zeldovich_Recon(klin,plin,R=15)
+#
+#   zelda.make_pddtable(f,nu,D=1,kmin=1e-3,kmax=0.5,nk=100)
+#
+#   if fishcast.AP: return ap1*pkw/ap0**2
+#   return pkw

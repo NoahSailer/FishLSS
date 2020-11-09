@@ -1,7 +1,7 @@
 # Ignoring most jupyter notebooks
-*.ipynb
-!driver.ipynb
+#*.ipynb
+#!driver.ipynb
 
 # Ignoring output directories
-output/
-figures/
+#output/
+#figures/

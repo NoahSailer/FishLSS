@@ -7,7 +7,8 @@ class experiment(object):
    '''
 
    def __init__(self, zmin=0.8, zmax=1.2, nbins=1, zedges=None, fsky=0.5, sigma_z=0.0, n=12., b=1.5, 
-                LBG=False, HI=False, Halpha=False, ELG=False, Euclid=False, custom_n=False, custom_b=False,
+                LBG=False, HI=False, Halpha=False, ELG=False, Euclid=False, MSE=False,
+                custom_n=False, custom_b=False,
                 pesimistic=False, Ndetectors=256**2.):
 
       self.zmin = zmin
@@ -27,6 +28,7 @@ class experiment(object):
       self.Halpha = Halpha
       self.ELG = ELG
       self.Euclid = Euclid
+      self.MSE = MSE
       self.custom_n = custom_n
       self.custom_b = custom_b
       self.Ndetectors = Ndetectors

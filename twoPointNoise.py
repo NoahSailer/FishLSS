@@ -42,6 +42,7 @@ def compute_n(fishcast, z):
    if fishcast.experiment.ELG and not fishcast.experiment.custom_n: return ELGn(fishcast, z)
    if fishcast.experiment.HI and not fishcast.experiment.custom_n: return HIneff(fishcast,z)
    if fishcast.experiment.Euclid and not fishcast.experiment.custom_n: return Euclidn(z)
+   if fishcast.experiment.MSE and not fishcast.experiment.custom_n: return MSEn(z)
    return fishcast.experiment.n(z)
     
     
@@ -108,6 +109,12 @@ def hAlphaN(fishcast, z):
    n = np.array(n)
    n_interp = interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)
    return n_interp(z)
+
+
+def MSEn(z):
+   zs = np.array([1.6,2.2,2.6,4.0])
+   ns = np.array([1.8,1.8,1.1,1.1])*1e-4
+   return interp1d(zs, ns, kind='linear', bounds_error=False, fill_value=0.)(z)
 
 
 def nofl(x, hexpack=True, Nside=256, D=6):
