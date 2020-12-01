@@ -4,6 +4,7 @@
 
 # Ignoring output directories
 output/**/derivatives/
+output/**/derivatives_Cl/
 figures/
 __pycache__/
 
