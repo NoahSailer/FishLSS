@@ -1,12 +1,12 @@
 import numpy as np
-from loginterp import loginterp
+from bao_recon.loginterp import loginterp
 import time
 
 from scipy.interpolate import interp1d
 from scipy.special import hyp2f1, hyperu, gamma
 
-from spherical_bessel_transform_fftw import SphericalBesselTransform
-from qfuncfft_recon import QFuncFFT
+from bao_recon.spherical_bessel_transform_fftw import SphericalBesselTransform
+from bao_recon.qfuncfft_recon import QFuncFFT
 import pyfftw
 
 class Zeldovich_Recon:

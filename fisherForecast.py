@@ -17,7 +17,8 @@ class fisherForecast(object):
                 Nmu=50, Nk=50, params=None, marg_params=np.array(['A_s','h']),
                 fEDE=0., log10z_c=3.56207, thetai_scf=2.83, A_lin=0., 
                 omega_lin=0.01, phi_lin=np.pi/2., velocileptors=False,
-                linear=False, name='toy_model',smooth=False,AP=True):
+                linear=False, name='toy_model',smooth=False,AP=True,
+                ell=np.arange(30,2000,1)):
       self.khmin = khmin
       self.khmax = khmax
       self.Nmu = Nmu
@@ -36,6 +37,7 @@ class fisherForecast(object):
       self.name = name
       self.smooth = smooth
       self.AP = AP
+      self.ell = ell
 
       self.experiment = None
       self.cosmo = None
@@ -82,8 +84,10 @@ class fisherForecast(object):
       redshifts = np.linspace(self.experiment.zmin,self.experiment.zmax,1000)
       Da_fid = np.array([self.cosmo.angular_distance(z) for z in redshifts])*self.params['h']
       Hz_fid = np.array([self.cosmo.Hubble(z)*(299792.458)/self.params['h'] for z in redshifts])
+      rsd_fid = np.array([self.cosmo.get_current_derived_parameters(['rs_d'])['rs_d']*self.params['h'] for z in redshifts])
       self.Da_fid = interp1d(redshifts,Da_fid,kind='linear')
       self.Hz_fid = interp1d(redshifts,Hz_fid,kind='linear')
+      self.rsd_fid = interp1d(redshifts,rsd_fid,kind='linear')
       
       self.P_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
       for i in range(self.experiment.nbins):
@@ -151,19 +155,24 @@ class fisherForecast(object):
           result = dPdmu_fixed_k(0)
           for i in range(1,self.Nk): result = result + dPdmu_fixed_k(i)
           return np.array(result)
+      
+      # There is no change from AP for any of these derivatives... 
           
-      if param == 'Da': 
-         K,MU = self.k,self.mu
-         result = -2.*P_fid + K*(1.-MU**2.)*dPdk() - MU*(1.-MU**2.)*dPdmu()
-         return result/(self.cosmo.angular_distance(z) * self.params['h']) 
-        
-      if param == 'Hz':
-         K,MU = self.k,self.mu
-         result = P_fid - K*MU**2.*dPdk() - MU*(1.-MU**2.)*dPdmu()
-         Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h']
-         return result/Hz
-        
-      # This list is getting ugly and somewhat out of hand. This should be coded up more cleverly...
+      #kwargs = {'fishcast' : self, 'z' : z, 'b' : -1., 'bE2' : 0., 'bEs' : 0., 'alpha0' : 0.,\
+      #          'alpha2' : 0., 'alpha4' : 0., 'sn' : 0., 'sn2' : 0., 'f' : -1., 'A_lin' : -1.,\
+      #          'omega_lin' : -1., 'phi_lin' : -1.}
+    
+   
+      #if param in kwargs: 
+      #   kwargs[param] = up
+      #   P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
+      #   kwargs[param] = upup
+      #   P_dummy_higher = compute_tracer_power_spectrum(**kwargs)
+      #   kwargs[param] = down
+      #   P_dummy_low = compute_tracer_power_spectrum(**kwargs)
+      #   kwargs[param] = downdown
+      #   P_dummy_lower = compute_tracer_power_spectrum(**kwargs)
+      #   dPdp = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
     
       if param == 'A_lin': 
          P_dummy_hi = compute_tracer_power_spectrum(self,z,A_lin=self.A_lin+absolute_step)
@@ -253,6 +262,7 @@ class fisherForecast(object):
          return dPdb * fNL_factor
             
       # derivative of early dark energy parameters (Hill+2020)
+      # ADD AP TO EDE DERIVATIVES!!!!!!
       if param == 'fEDE' and self.fEDE == 0.:
          EDE_params = {'log10z_c': self.log10z_c,'fEDE': absolute_step,'thetai_scf': self.thetai_scf,
                        'Omega_Lambda':0.0,'Omega_fld':0,'Omega_scf':-1,
@@ -320,12 +330,23 @@ class fisherForecast(object):
          set_param(up)
          self.cosmo.compute()
          P_dummy_hi = compute_tracer_power_spectrum(self,z)
+         ap0_hi = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
+         ap1_hi = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+         #
          set_param(upup)
          self.cosmo.compute()
          P_dummy_higher = compute_tracer_power_spectrum(self,z)
+         ap0_higher = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z)
+         ap1_higher = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+         #
          set_param(default_value)
          self.cosmo.compute()
          result += (P_fid - (4./3.) * P_dummy_hi + (1./3.) * P_dummy_higher) / ((-2./3.) * step)
+         dap0dp = (1 - (4./3.) * ap0_hi + (1./3.) * ap0_higher) / ((-2./3.) * step)
+         dap1dp = (1 - (4./3.) * ap1_hi + (1./3.) * ap1_higher) / ((-2./3.) * step)
+         K,MU = self.k,self.mu
+         if self.AP: result += (dap1dp-2*dap0dp)*P_fid + MU*(1-MU**2)*(dap1dp+dap0dp)*dPdmu() +\
+                                   K*(dap1dp*MU**2 - dap0dp*(1-MU**2))*dPdk()
          if flag: result *= self.params['A_s']
          return result
 
@@ -333,18 +354,36 @@ class fisherForecast(object):
          set_param(up)
          self.cosmo.compute()
          P_dummy_hi = compute_tracer_power_spectrum(self,z)
+         ap0_hi = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
+         ap1_hi = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+         #
          set_param(upup)
          self.cosmo.compute()
          P_dummy_higher = compute_tracer_power_spectrum(self,z)
+         ap0_higher = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z)
+         ap1_higher = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+         #
          set_param(down)
          self.cosmo.compute()
          P_dummy_low = compute_tracer_power_spectrum(self,z)
+         ap0_low = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z)
+         ap1_low = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+         #
          set_param(downdown)
          self.cosmo.compute()
          P_dummy_lower = compute_tracer_power_spectrum(self,z)
+         ap0_lower = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
+         ap1_lower = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+         #
          set_param(default_value)
          self.cosmo.compute()
+         #
          result += (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
+         dap0dp = (-ap0_higher + 8.*ap0_hi - 8.*ap0_low + ap0_lower) / (12. * step)
+         dap1dp = (-ap1_higher + 8.*ap1_hi - 8.*ap1_low + ap1_lower) / (12. * step)
+         K,MU = self.k,self.mu
+         if self.AP: result += (dap1dp-2*dap0dp)*P_fid + MU*(1-MU**2)*(dap1dp+dap0dp)*dPdmu() +\
+                                   K*(dap1dp*MU**2 - dap0dp*(1-MU**2))*dPdk()
          if flag: result *= self.params['A_s']
          return result
 
@@ -352,16 +391,153 @@ class fisherForecast(object):
       set_param(up)
       self.cosmo.compute()
       P_dummy_hi = compute_tracer_power_spectrum(self,z)
+      ap0_hi = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
+      ap1_hi = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+      #
       set_param(down)
       self.cosmo.compute()
       P_dummy_low = compute_tracer_power_spectrum(self,z)
+      ap0_low = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z)
+      ap1_low = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
+      #
       set_param(default_value)
       self.cosmo.compute()
       result += (P_dummy_hi - P_dummy_low) / (2. * step)
+      dap0dp = (ap0_hi - ap0_low) / (2. * step)
+      dap1dp = (ap1_hi - ap1_low) / (2. * step)
+      K,MU = self.k,self.mu
+      if self.AP: result += (dap1dp-2*dap0dp)*P_fid + MU*(1-MU**2)*(dap1dp+dap0dp)*dPdmu() +\
+                                K*(dap1dp*MU**2 - dap0dp*(1-MU**2))*dPdk()
       if flag: result *= self.params['A_s']
       return result
-   
 
+
+   def compute_dCdp(self, param, X, Y, zmin, zmax, relative_step=-1., absolute_step=-1.):
+      '''
+      '''
+      default_step = {'log(A_s)':0.1,'A_s':0.1,'omega_cdm':0.2,'n_s':0.1,'tau_reio':0.3,'m_ncdm':0.05}
+        
+      if relative_step == -1.: 
+         try: relative_step = default_step[param]
+         except: relative_step = 0.01
+      if absolute_step == -1.: 
+         try: absolute_step = default_step[param]
+         except: absolute_step = 0.01
+    
+      P_fid = compute_lensing_Cell(self, X, Y, zmin, zmax)
+        
+      if param == 'gamma':
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax, gamma=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax,gamma=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax,gamma=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax,gamma=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+                            
+      if param == 'b2':
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax, bE2=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax,bE2=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax,bE2=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax,bE2=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+        
+      if param == 'bs':
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax,bEs=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax,bEs=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax,bEs=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax,bEs=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+      
+      if param == 'alpha0':
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha0=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha0=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha0=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha0=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+      
+      if param == 'alpha2':
+         # Strange factor of -1 here...
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha2=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha2=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha2=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax,alpha2=-2.*absolute_step)
+         return -1.*(-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+      
+      if param == 'alpha4':
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax, alpha4=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax, alpha4=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax, alpha4=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax, alpha4=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+        
+      if param == 'sn2':
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax, sn2=absolute_step)
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax, sn2=2.*absolute_step)
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax, sn2=-absolute_step)
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax, sn2=-2.*absolute_step)
+         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * absolute_step)
+        
+      if param == 'b': 
+         b_fid = compute_b(self,(zmin+zmax)/2)
+         P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax,b=b_fid*(1.+relative_step))
+         P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax,b=b_fid*(1.+2.*relative_step))
+         P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax,b=b_fid*(1.-relative_step))
+         P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax,b=b_fid*(1.-2.*relative_step))
+         dPdb = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * self.phi_lin * relative_step)
+         return dPdb
+      
+      # brute force numerical differentiation
+      flag = False 
+      if param == 'log(A_s)' : 
+         flag = True
+         param = 'A_s'  
+        
+      default_value = self.params[param] 
+        
+      if param == 'm_ncdm' and self.params['N_ncdm']>1:
+         # CLASS takes a string as an input when there is more than one massless neutrino
+         default_value_float = np.array(list(map(float,list(default_value.split(',')))))
+         Mnu = sum(default_value_float)
+         up = ','.join(list(map(str,list(default_value_float+relative_step*Mnu/self.params['N_ncdm']))))
+         upup = ','.join(list(map(str,list(default_value_float+2.*relative_step*Mnu/self.params['N_ncdm']))))
+         down = ','.join(list(map(str,list(default_value_float-relative_step*Mnu/self.params['N_ncdm']))))
+         downdown = ','.join(list(map(str,list(default_value_float-2.*relative_step*Mnu/self.params['N_ncdm']))))
+         step = Mnu*relative_step
+      else:
+         up = default_value * (1. + relative_step)
+         if default_value == 0.: up = default_value + absolute_step
+         upup = default_value * (1. + 2.*relative_step)
+         if default_value == 0.: upup = default_value + 2.*absolute_step
+         down = default_value * (1. - relative_step)
+         if default_value == 0.: down = default_value - absolute_step
+         downdown = default_value * (1. - 2.*relative_step)
+         if default_value == 0.: downdown = default_value - 2.*absolute_step
+         step = default_value * relative_step
+         if default_value == 0.: step = absolute_step
+            
+    
+      def set_param(value):
+         self.cosmo.set({param : value})
+         self.params[param] = value
+      
+      set_param(up)
+      self.cosmo.compute()
+      P_dummy_hi = compute_lensing_Cell(self, X, Y, zmin, zmax)
+      set_param(upup)
+      self.cosmo.compute()
+      P_dummy_higher = compute_lensing_Cell(self, X, Y, zmin, zmax)
+      set_param(down)
+      self.cosmo.compute()
+      P_dummy_low = compute_lensing_Cell(self, X, Y, zmin, zmax)
+      set_param(downdown)
+      self.cosmo.compute()
+      P_dummy_lower = compute_lensing_Cell(self, X, Y, zmin, zmax)
+      set_param(default_value)
+      self.cosmo.compute()
+      result = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
+      if flag: result *= self.params['A_s']
+      return result
+
+   
    def Sigma2(self, z): return sum(compute_matter_power_spectrum(self,z,linear=True)*self.dk*self.dmu) / (6.*np.pi**2.)
 
     
@@ -411,6 +587,28 @@ class fisherForecast(object):
             elif marg_param == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z))+'.txt'
             else: filename = marg_param+'_'+str(int(100*z))+'.txt'
             np.savetxt('output/'+self.name+'/derivatives/'+filename,dPdp)
+       
+    
+   def compute_Cl_derivatives(self):
+      '''
+      Calculates the derivatives of Ckk, Ckg, and Cgg with respect to 
+      each of the marg_params. 
+      '''
+      zs = self.experiment.zedges
+      for marg_param in self.marg_params:
+         #
+         dCdp = self.compute_dCdp(marg_param, 'k', 'k', zs[0], zs[1])
+         filename = 'Ckk_'+marg_param+'.txt'
+         np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)
+         #
+         for i,z in enumerate(zs[:-1]):
+            dCdp = self.compute_dCdp(marg_param, 'g', 'g', zs[i], zs[i+1])
+            filename = 'Cgg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
+            np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)   
+            #
+            dCdp = self.compute_dCdp(marg_param, 'k', 'g', zs[i], zs[i+1])
+            filename = 'Ckg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
+            np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)
             
             
    def check_derivatives(self):
@@ -483,11 +681,15 @@ class fisherForecast(object):
          z = self.experiment.zcenters[zbin_index]
          dPdvecp = derivatives[zbin_index]
          Cinv = 1./self.get_covariance_matrix(zbin_index)
+         mus = self.mu.reshape(self.Nk,self.Nmu)[0] 
+         ks = self.k.reshape(self.Nk,self.Nmu)[:,0] 
          constraints = self.compute_wedge(z)*self.kmax_constraint(z,kmax_knl)
          if kmax > 0: constraints = self.compute_wedge(z)*(self.k<kmax)
          for i in range(n):
             for j in range(n):
-               F[i,j] = np.sum(dPdvecp[i]*Cinv*dPdvecp[j]*constraints)
+               integrand = (dPdvecp[i]*Cinv*dPdvecp[j]*constraints/self.dmu).reshape(self.Nk,self.Nmu)
+               tmp = np.array([integrate.quad(interp1d(mus,integrand[m],kind=5),0,1)[0] for m in range(self.Nk)]) 
+               F[i,j] = np.sum(tmp)
          return F
 
       result = sum([fish(i) for i in zbins])

@@ -1,7 +1,11 @@
 # Ignoring most jupyter notebooks
-#*.ipynb
+*.ipynb
 #!driver.ipynb
 
 # Ignoring output directories
-#output/
-#figures/
+output/**/derivatives/
+figures/
+__pycache__/
+
+# Ignoring some specific files
+notebook_helper_functions.py

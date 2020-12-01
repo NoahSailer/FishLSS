@@ -15,18 +15,20 @@ from fisherForecast import *
 import sys
 from LPT.moment_expansion_fftw import MomentExpansion
 import scipy
-from loginterp import loginterp
+
+from bao_recon.loginterp import loginterp
 import time
 from scipy.special import hyp2f1, hyperu, gamma
-from spherical_bessel_transform_fftw import SphericalBesselTransform
-from qfuncfft_recon import QFuncFFT
+from bao_recon.spherical_bessel_transform_fftw import SphericalBesselTransform
+from bao_recon.qfuncfft_recon import QFuncFFT
 import pyfftw
-from zeldovich_rsd_recon_fftw import Zeldovich_Recon
+from bao_recon.zeldovich_rsd_recon_fftw import Zeldovich_Recon
 
 ##################################################################################
 # make plots prettier
 import matplotlib
 from matplotlib.pyplot import rc
+import matplotlib.font_manager
 
 rc('font',**{'size':'22','family':'serif','serif':['CMU serif']})
 rc('mathtext', **{'fontset':'cm'})
