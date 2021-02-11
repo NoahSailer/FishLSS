@@ -1,8 +1,8 @@
 import numpy as np
 from scipy.interpolate import interp1d
 
-from Utils.loginterp import loginterp
-from LPT.velocity_moments_fftw import VelocityMoments
+from velocileptors.Utils.loginterp import loginterp
+from velocileptors.LPT.velocity_moments_fftw import VelocityMoments
 
 
 
@@ -59,8 +59,8 @@ class MomentExpansion(VelocityMoments):
             self.make_kappatable(kmin = self.kmin, kmax = self.kmax, nk = self.nk)
             self.convert_kappa_bases()
         
-# modified Nmu
-    def compute_redshift_space_power_at_mu(self,pars,f,mu_obs,counterterm_c3=0,reduced=False,apar=1,aperp=1,Nmu=1):
+
+    def compute_redshift_space_power_at_mu(self,pars,f,mu_obs,counterterm_c3=0,reduced=False,apar=1,aperp=1):
         '''
         Moment expansion approach.
         
@@ -101,12 +101,11 @@ class MomentExpansion(VelocityMoments):
                 kv, s0, s2 = self.combine_bias_terms_sk(b1,b2,bs,b3,alpha_s0,alpha_s2,sigma0_stoch,basis='Polynomial')
                 kv, g1, g3 = self.combine_bias_terms_gk(b1,b2,bs,b3,alpha_g1,alpha_g3)
                 kv, k0, k2, k4 = self.combine_bias_terms_kk(alpha_k2,sn4)
-           
-            # modified     
-            ret = np.repeat(pk,Nmu) - f * np.repeat(kv,Nmu) * mu2 * np.repeat(vk,Nmu) -\
-                  0.5 * f**2 * np.repeat(kv,Nmu)**2 * mu2 * ( np.repeat(s0,Nmu) + np.repeat(s2,Nmu)* mu2 ) +\
-                  1./6 * f**3 * np.repeat(kv,Nmu)**3 * mu**3 * (np.repeat(g1,Nmu) + mu2 * np.repeat(g3,Nmu)) +\
-                  1./24 * f**4 * np.repeat(kv,Nmu)**4 * mu**4 * (np.repeat(k0,Nmu) + mu2*np.repeat(k2,Nmu) + mu2**2*np.repeat(k4,Nmu))
+                
+            ret = pk - f * kv * mu2 * vk -\
+                  0.5 * f**2 * kv**2 * mu2 * ( s0 + s2* mu2 ) +\
+                  1./6 * f**3 * kv**3 * mu**3 * (g1 + mu2 * g3) +\
+                  1./24 * f**4 * kv**4 * mu**4 * (k0 + mu2*k2 + mu2**2*k4)
                   
         else:
             if reduced:
@@ -127,20 +126,17 @@ class MomentExpansion(VelocityMoments):
                 kv, s0, s2 = self.combine_bias_terms_sk(b1,b2,bs,b3,alpha_s0,alpha_s2,sigma0_stoch,basis='Polynomial')
 
             mu2 = mu**2
-            # modified
-            ret = np.repeat(pk,Nmu) - f * np.repeat(kv,Nmu) * mu2 * np.repeat(vk,Nmu) -\
-                0.5 * f**2 * np.repeat(kv,Nmu)**2 * mu2 * ( np.repeat(s0,Nmu) + np.repeat(s2,Nmu)* mu2 ) +\
-                ct3 /6. * np.repeat(self.kv,Nmu)**2 * mu2**2 * np.repeat(self.pktable[:,-1],Nmu)
+            ret = pk - f * kv * mu2 * vk -\
+                0.5 * f**2 * kv**2 * mu2 * ( s0 + s2* mu2 ) +\
+                ct3 /6. * self.kv**2 * mu2**2 * self.pktable[:,-1]
         
         # Interpolate onto true wavenumbers
-        
-        # Modified: AP effect implimented separately in fishlss
-        #kobs = self.kv * aperp / AP_fac
-        #pks_obs = interp1d(kobs, ret, kind='cubic', fill_value='extrapolate')(self.kv)
-        #pks_obs = pks_obs / aperp**2 / apar
+        kobs = self.kv * aperp / AP_fac
+        pks_obs = interp1d(kobs, ret, kind='cubic', fill_value='extrapolate')(self.kv)
+        pks_obs = pks_obs / aperp**2 / apar
         #pks_obs = np.interp(self.kv, kobs, ret)
         
-        return np.repeat(self.kv,Nmu), ret
+        return self.kv, pks_obs
 
 
     def compute_redshift_space_power_multipoles(self, pars, f, counterterm_c3=0, ngauss=4, reduced=False, apar=1, aperp = 1):

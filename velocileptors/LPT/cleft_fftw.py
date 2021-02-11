@@ -4,9 +4,9 @@ import time
 
 from scipy.interpolate import interp1d
 
-from Utils.spherical_bessel_transform_fftw import SphericalBesselTransform
-from Utils.qfuncfft import QFuncFFT
-from Utils.loginterp import loginterp
+from velocileptors.Utils.spherical_bessel_transform_fftw import SphericalBesselTransform
+from velocileptors.Utils.qfuncfft import QFuncFFT
+from velocileptors.Utils.loginterp import loginterp
 
 class CLEFT:
     '''
@@ -24,7 +24,7 @@ class CLEFT:
     
     '''
 
-    def __init__(self, k, p, one_loop=True, shear=True, third_order=False, cutoff=10, jn=5, N = 2000, threads=1, extrap_min = -5, extrap_max = 3, import_wisdom=False, wisdom_file='wisdom.npy'):
+    def __init__(self, k, p, one_loop=True, shear=True, third_order=True, cutoff=10, jn=5, N = 2000, threads=1, extrap_min = -5, extrap_max = 3, import_wisdom=False, wisdom_file='wisdom.npy'):
 
         
         self.N = N

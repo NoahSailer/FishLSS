@@ -1,8 +1,14 @@
 from headers import *
-from LPT.moment_expansion_fftw import MomentExpansion
+from velocileptors.LPT.cleft_fftw import CLEFT
+from bao_recon.zeldovich_rsd_recon_fftw import Zeldovich_Recon
+from velocileptors.LPT.lpt_rsd_fftw import LPT_RSD
 from scipy.signal import savgol_filter
 from castorina import castorinaBias,castorinaPn
 from twoPointNoise import *
+from scipy.integrate import simps
+from math import ceil
+from scipy.interpolate import InterpolatedUnivariateSpline as Spline
+
 
 def compute_matter_power_spectrum(fishcast, z, linear=False):
    '''
@@ -12,7 +18,7 @@ def compute_matter_power_spectrum(fishcast, z, linear=False):
    spectrum.
    Returns an array of length Nk*Nmu. 
    '''
-   kk = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),fishcast.Nk)
+   kk = np.logspace(np.log10(fishcast.kmin),np.log10(fishcast.kmax),fishcast.Nk)
    if linear: pmatter = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
    else: pmatter = np.array([fishcast.cosmo.pk_cb(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
    return np.repeat(pmatter,fishcast.Nmu)
@@ -30,15 +36,6 @@ def LBGb(fishcast,z):
    B = lambda m: 0.12*(m-25.) + 0.17
    def b(m): return A(m)*(1.+z)+B(m)*(1.+z)**2.
    return b(24.5)
-   #def b(M): 
-   #   m = M + 5. * np.log10(fishcast.cosmo.luminosity_distance(z)*1.e5) - 2.5 * np.log10(1.+z)
-   #   return A(m)*(1.+z)+B(m)*(1.+z)**2.
-   #upper_limit = Muv(fishcast,z)
-   #integrand = lambda M: (np.log(10.)/2.5) * phi(z) * 10.**( -0.4 * (1.+alpha(z)) * (M-Muvstar(z)) )*\
-   #                          np.exp(-10.**(-0.4 * (M-Muvstar(z)) ) )
-   #weighted_bias = lambda M: integrand(M) * b(M)
-   #return scipy.integrate.quad(weighted_bias, -200, upper_limit)[0]/scipy.integrate.quad(integrand, -200, upper_limit)[0]
-
 
 def hAlphaB(z):
    '''
@@ -49,15 +46,24 @@ def hAlphaB(z):
    b_interp = interp1d(zs, b, kind='linear', bounds_error=False, fill_value=0.)
    return b_interp(z) 
 
+def EuclidB(z):
+   '''
+   From Table 3 of arxiv.org/pdf/1910.09273
+   '''
+   zs = np.array([0.9,1.,1.2,1.4,1.65,1.8])
+   b = np.array([1.46,1.46,1.61,1.75,1.90,1.90])
+   b_interp = interp1d(zs, b, kind='linear', bounds_error=False, fill_value=0.)
+   return b_interp(z) 
+
 
 def ELGb(fishcast,z):
-   D = fishcast.cosmo.scale_independent_growth_factor(z)
+   D = fishcast.cosmo_fid.scale_independent_growth_factor(z)
    return 0.84/D
 
 
 def MSEb(fishcast,z):
-   D = fishcast.cosmo.scale_independent_growth_factor(z)
-   D0 = fishcast.cosmo.scale_independent_growth_factor(0)
+   D = fishcast.cosmo_fid.scale_independent_growth_factor(z)
+   D0 = fishcast.cosmo_fid.scale_independent_growth_factor(0)
    return D0/D
 
 
@@ -76,18 +82,17 @@ def compute_f(fishcast, z, step=0.01):
    return -(1.+z) * dPdz / (2. * p_fid)
 
 
-
 def compute_b(fishcast,z):
    if fishcast.experiment.LBG and not fishcast.experiment.custom_b: return LBGb(fishcast,z)
    if fishcast.experiment.HI and not fishcast.experiment.custom_b: return HIb(z)
    if fishcast.experiment.Halpha and not fishcast.experiment.custom_b: return hAlphaB(z)
    if fishcast.experiment.ELG and not fishcast.experiment.custom_b: return ELGb(fishcast,z)
-   if fishcast.experiment.Euclid and not fishcast.experiment.custom_b: return np.sqrt(1+z)
+   if fishcast.experiment.Euclid and not fishcast.experiment.custom_b: return EuclidB(z) 
    if fishcast.experiment.MSE and not fishcast.experiment.custom_b: return MSEb(fishcast,z)
    return fishcast.experiment.b(z)
 
 
-def get_smoothed_p(fishcast,z,division_factor=2.):
+def get_smoothed_p(fishcast,z,klin,plin,division_factor=2.):
    '''
    Returns a power spectrum without wiggles, given by:
       P_nw = P_approx * F[P/P_approx]
@@ -102,7 +107,7 @@ def get_smoothed_p(fishcast,z,division_factor=2.):
       Obh2      = fishcast.params['omega_b'] 
       Omh2      = fishcast.params['omega_b'] + fishcast.params['omega_cdm']
       f_baryon  = Obh2 / Omh2
-      theta_cmb = fishcast.cosmo.T_cmb() / 2.7
+      theta_cmb = fishcast.cosmo_fid.T_cmb() / 2.7
       k_eq = 0.0746 * Omh2 * theta_cmb ** (-2)
       sound_horizon = fishcast.params['h'] * 44.5 * np.log(9.83/Omh2) / \
                             np.sqrt(1 + 10 * Obh2** 0.75) 
@@ -118,45 +123,46 @@ def get_smoothed_p(fishcast,z,division_factor=2.):
       t_with_wiggles = np.sqrt(p/k**fishcast.params['n_s'])
       t_with_wiggles /= t_with_wiggles[0]
       return p * (Teh/t_with_wiggles)**2.
-    
-   klin = np.logspace(np.log10(fishcast.khmin),np.log10(fishcast.khmax),int(fishcast.Nk))
-   plin = np.array([fishcast.cosmo.pk_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+
    p_approx = Peh(klin,plin)
    psmooth = savgol_filter(plin/p_approx,int(fishcast.Nk/division_factor)+1-\
                                          int(fishcast.Nk/division_factor)%2, 6)*p_approx
    return psmooth
 
 
-def compute_tracer_power_spectrum(fishcast, z, b=-1., bE2=0., bEs=0., alpha0=0., alpha2=0., alpha4=0.,
-                                  sn=0.,sn2=0.,f=-1., A_lin=-1., omega_lin=-1., phi_lin=-1.):
+def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1, 
+                                  alpha0=-1, alpha2=0, alpha4=0.,alpha6=0.,
+                                  N=None,N2=-1,N4=0.,f=-1., A_lin=-1., 
+                                  omega_lin=-1., phi_lin=-1.,kIR=0.2):
    '''
-   Computes the nonlinear redshift-space power spectrum P(k,mu) [Mpc/h]^3 of the matter tracer.
-   Returns an array of length Nk*Nmu. 
+   Computes the nonlinear redshift-space power spectrum P(k,mu) [Mpc/h]^3 
+   of the matter tracer. Returns an array of length Nk*Nmu. 
    '''
-   bfid = compute_b(fishcast,z)
-   if b == -1.: b = bfid
+   if fishcast.recon: 
+      return compute_recon_power_spectrum(fishcast,z,b=b,b2=b2,bs=bs,N=N)
+
+   if b == -1.: b = compute_b(fishcast,z)
+   if b2 == -1: b2 = 8*(b-1)/21
+   if bs == -1: bs = -2*(b-1)/7
    if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
    if A_lin == -1.: A_lin = fishcast.A_lin
    if omega_lin == -1.: omega_lin = fishcast.omega_lin
-   if phi_lin == -1.: phi_lin = fishcast.phi_lin
+   if phi_lin == -1.: phi_lin = fishcast.phi_lin 
+   if alpha0 == -1: alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
+   if N is None: N = 1/compute_n(fishcast,z)
+   noise = 1/compute_n(fishcast,z)
+   if fishcast.experiment.HI: noise = noise[0]
+   sigv = fishcast.experiment.sigv
+   Hz = fishcast.Hz_fid(z)
+   if N2 == -1: N2 = -noise*((1+z)*sigv/fishcast.Hz_fid(z))**2
     
-   # For AP effect 
-   #ap0 = fishcast.cosmo.angular_distance(z)*fishcast.params['h'] / fishcast.Da_fid(z)
-   #ap0 *= fishcast.rsd_fid(z) / (fishcast.cosmo.get_current_derived_parameters(['rs_d'])['rs_d']*fishcast.params['h'])
-   #ap1 = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h'] / fishcast.Hz_fid(z)
-   #ap1 *= fishcast.cosmo.get_current_derived_parameters(['rs_d'])['rs_d']*fishcast.params['h'] / fishcast.rsd_fid(z)
-
-   K,MU = fishcast.k,fishcast.mu
-    
-   #if fishcast.AP: 
-   #   ap_factor = np.sqrt(ap1**2 * fishcast.mu**2 + (1-fishcast.mu**2)/ap0**2)
-   #   kprime = fishcast.k*ap_factor
-   #   muprime = fishcast.mu*ap1/ap_factor
-   #   K,MU = kprime,muprime
-    
+   K = fishcast.k
+   MU = fishcast.mu
+   h = fishcast.params['h']
    klin = np.array([K[i*fishcast.Nmu] for i in range(fishcast.Nk)])
-   plin = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+   plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin])
    plin *= (1. + A_lin * np.sin(omega_lin * klin + phi_lin))
+
    if fishcast.smooth: plin = get_smoothed_p(fishcast,z)
 
    if not fishcast.velocileptors:
@@ -164,163 +170,225 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., bE2=0., bEs=0., alpha0=0.,
       # and approximate RSD with Kaiser.
       pmatter = np.repeat(plin,fishcast.Nmu)
       result = pmatter * (b+f*MU**2.)**2. 
-      #if fishcast.AP: return ap1*result/ap0**2
       return result
     
-   mome = MomentExpansion(klin,plin,kmin=min(K),kmax=max(K),nk=fishcast.Nk)
-   b1 = b-1.
-   b2 = bE2 + 8*(bfid-b)/21 # these factors keep b2 and bs fixed when varying b
-   bs = bEs - 2*(bfid-b)/7
-   alpha0_fid = 1.22 + 0.24*bfid**2*(z-5.96) 
-   Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
-   biases = [b1,b2,bs,0.]
-   cterms = [alpha0+alpha0_fid,alpha2,alpha4]
-   noise = compute_n(fishcast,z)
-   if fishcast.experiment.HI: noise = noise[0]
-   # The velocileptors sn2 input adds a term ~ - 2 * sn2 * (k mu)^2 to the power spectrum. To
-   # correct for this strange factor of -2, I multiply my -0.5.
-   stoch  = [sn,-0.5*sn2-0.5*noise*((1+z)*300/Hz)**2.]
+   bL1 = b-1.
+   bL2 = b2 - 8*(b-1)/21 
+   bLs = bs + 2*(b-1)/7
+   
+   biases = [bL1,bL2,bLs,0.]
+   cterms = [alpha0,alpha2,alpha4,alpha6]
+   stoch  = [0,N2,N4]
    pars   = biases + cterms + stoch
-   kw,pkw = mome.compute_redshift_space_power_at_mu(pars,f,MU,reduced=True,Nmu=fishcast.Nmu)
-   del mome
-   # pkw is the redshift-space non-linear power spectrum of the matter tracer
-   #if fishcast.AP: return ap1*pkw/ap0**2
-   return pkw
 
+   lpt = LPT_RSD(klin,plin,kIR=kIR)
+   lpt.make_pltable(f,kmin=min(klin),kmax=max(klin),nk=len(klin))
+   k,p0,p2,p4 = lpt.combine_bias_terms_pkell(pars)
+   p0 = np.repeat(p0,fishcast.Nmu)
+   p2 = np.repeat(p2,fishcast.Nmu)
+   p4 = np.repeat(p4,fishcast.Nmu)
+   pkmu = p0+0.5*(3*MU**2-1)*p2+0.125*(35*MU**4-30*MU**2+3)*p4 + N
+   del lpt
+   return pkmu 
+   
+   #N = 4
+   #mus = np.linspace(0,1,N)
+   #ps = np.array([pkw(mu) for mu in mus])
+   #A = np.array([[mu**(2*i) for i in range(N)] for mu in mus])
+   #Ainv = np.linalg.inv(A)
+   #C = np.dot(Ainv,ps)
 
-def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1., bE2=0., bEs=0., alpha0=0., alpha2=0., 
-                         alpha4=0., sn=0.,sn2=0.,f=-1., A_lin=-1., omega_lin=-1., phi_lin=-1.):
+   #def p_interp(mu):
+   #   x = np.array([mu**(2*i) for i in range(N)])
+   #   return np.dot(x,C)
+   
+
+def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1., 
+                                   b2=-1,bs=-1,alpha0=-1,alphax=0,N=None):
    '''
-   Calculates the real space (non-linear) P^XY where X,Y = k or g. Returns a function of k.
+   Wrapper function for CLEFT. Returns P_XY where X,Y = k or g
+   as a function of k.
    '''
-   bfid = compute_b(fishcast,z)
-   if b == -1.: b = bfid
-   if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
-   if A_lin == -1.: A_lin = fishcast.A_lin
-   if omega_lin == -1.: omega_lin = fishcast.omega_lin
-   if phi_lin == -1.: phi_lin = fishcast.phi_lin
-    
+   if b == -1.: b = compute_b(fishcast,z)
+   if b2 == -1: b2 = 8*(b-1)/21
+   if bs == -1: bs = -2*(b-1)/7
+   if alpha0 == -1: alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
+   if N == None: 
+      N = 1/compute_n(fishcast,z)
+      if fishcast.experiment.HI: N = N[0]
    bk = (1+gamma)/2-1
-
-   klin = np.logspace(np.log10(min(fishcast.k)),np.log10(max(fishcast.k)),fishcast.Nk)
+   h = fishcast.params['h']
+   
+   K = fishcast.k
     
-   plin = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
-   mome = MomentExpansion(klin,plin,kmin=min(fishcast.k),kmax=max(fishcast.k),nk=fishcast.Nk)
+   klin = np.array([K[i*fishcast.Nmu] for i in range(fishcast.Nk)])
+   plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin])
     
-   b1 = b-1.
-   b2 = bE2 + 8*(bfid-b)/21 # these factors keep b2 and bs fixed when varying b
-   bs = bEs - 2*(bfid-b)/7
-   alpha0_fid = 1.22 + 0.24*bfid**2*(z-5.96) 
-   Hz = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
-   biases = [b1,b2,bs,0.]
-   cterms = [alpha0+alpha0_fid,alpha2,alpha4]
-   noise = compute_n(fishcast,z)
-   if fishcast.experiment.HI: noise = noise[0]
-   # The velocileptors sn2 input adds a term ~ - 2 * sn2 * (k mu)^2 to the power spectrum. To
-   # correct for this strange factor of -2, I multiply my -0.5.
-   stoch  = [sn,-0.5*sn2-0.5*noise*((1+z)*300/Hz)**2.]
-   pars   = biases + cterms + stoch
-    
-   if X == Y and X == 'k':
-      pars = [0,0,0,0] + [0,0,0] + [0,0]
-      kw, Pmm = mome.compute_redshift_space_power_at_mu(pars,f,0,reduced=True,Nmu=1)
-      return interp1d(klin, Pmm, kind='linear', bounds_error=False, fill_value=0.)
-    
-   #1, b1, b1^2, b2, b1 b2, b2^2, bs, b1 bs, b2 bs, bs^2, b3, b1 b3
-
-   if X == Y and X == 'g':
-      kw, Pgg = mome.compute_redshift_space_power_at_mu(pars,f,0,reduced=True,Nmu=1)
-      return interp1d(klin, Pgg, kind='linear', bounds_error=False, fill_value=0.)
-
-   Pkg = mome.pktable[:,1] + 0.5*(b1 + bk)*mome.pktable[:,2] + b1*bk*mome.pktable[:,3] +\
-         0.5*b2*mome.pktable[:,4] + 0.5*bk*b2*mome.pktable[:,5] + 0.5*bs*mome.pktable[:,7]+\
-         0.5*bk*bs*mome.pktable[:,8]
-   return interp1d(klin, Pkg, kind='linear', bounds_error=False, fill_value=0.) 
-
-
-
-def compute_lensing_Cell(fishcast, X, Y, zmin, zmax, gamma=1., b=-1., bE2=0., bEs=0., alpha0=0., alpha2=0., 
-                         alpha4=0., sn=0.,sn2=0.,f=-1., A_lin=-1., omega_lin=-1., phi_lin=-1.):
-   '''
-   Calculates C^XY_l where X,Y = k or g. Returns an array of length len(fishcast.ell).
-   '''
    if X == Y and X == 'k': 
+      pmm = np.array([fishcast.cosmo.pk_cb(k*h,z)*h**3. for k in klin])
+      pmm *= (bk+1)**2
+      return interp1d(klin, pmm, kind='linear', bounds_error=False, fill_value=0.) 
+   
+   cleft = CLEFT(klin,plin)
+   cleft.make_ptable(kmin=min(klin),kmax=max(klin),nk=fishcast.Nk)
+   
+   bL1 = b-1.
+   bL2 = b2 - 8*(b-1)/21 
+   bLs = bs + 2*(b-1)/7
+    
+   if X == Y and X == 'g':
+      kk,pgg = cleft.combine_bias_terms_pk(bL1,bL2,bLs,alpha0,0,N) 
+      return interp1d(kk, pgg, kind='linear', bounds_error=False, fill_value=0.) 
+   
+   # if neither of the above cases are true, return Pkg
+   kk = cleft.pktable[:,0]
+   pkg = cleft.pktable[:,1]+0.5*(bL1+bk)*cleft.pktable[:,2]+bL1*bk*cleft.pktable[:,3]+\
+         0.5*bL2*cleft.pktable[:,4]+0.5*bk*bL2*cleft.pktable[:,5]+0.5*bLs*cleft.pktable[:,7]+\
+         0.5*bk*bLs*cleft.pktable[:,8]+alphax*kk**2*cleft.pktable[:,11]
+   return interp1d(kk, pkg, kind='linear', bounds_error=False, fill_value=0.) 
+   
+   
+def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1., 
+                         b=-1,b2=-1,bs=-1, alpha0=-1,alphax=0.,N=-1,
+                         noise=False,Nzsteps=100,Nzeff='auto',maxDz=0.2):
+   '''
+   Calculates C^XY_l using the Limber approximation where X,Y = 'k' or 'g'. 
+   Returns an array of length len(fishcast.ell). If X=Y=k, use CLASS with 
+   HaloFit to calculate the lensing convergence. 
+   ---------------------------------------------------------------------
+   noise: if True returns the projected shot noise. 
+   (replaces P -> 1/n)
+
+   Nzsteps: number of integration points
+   ---------------------------------------------------------------------
+   '''
+   if X == Y and X == 'k' and zmin is None and zmax is None: 
       lmin,lmax = int(min(fishcast.ell)),int(max(fishcast.ell))
       Cphiphi = fishcast.cosmo.raw_cl(lmax)['pp'][lmin:]
-      return 0.25*fishcast.ell**2*(fishcast.ell+1)**2*Cphiphi * ((1+gamma)/2)**2
+      return 0.25*fishcast.ell**2*(fishcast.ell+1)**2*Cphiphi*((1+gamma)/2)**2
+
+   if zmin is None or zmax is None: raise Exception('Must specify zmin and zmax')
+   if zmid is None: zmid = (zmin+zmax)/2
+    
+   b_fid = compute_b(fishcast,zmid)  
+   b2_fid = 8*(b_fid-1)/21
+   bs_fid = -2*(b_fid-1)/7
+   alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96) 
+   N_fid = 1/compute_n(fishcast,zmid)
+   if fishcast.experiment.HI: N_fid = N_fid[0]
+        
+   if b == -1: b = b_fid
+   if b2 == -1: b2 = b2_fid
+   if bs == -1: bs = bs_fid
+   if alpha0 == -1: alpha0 = alpha0_fid
+   if N == -1: N = N_fid
        
-   z_star = 1100
+   z_star = 1098
    chi = lambda z: (1.+z)*fishcast.cosmo.angular_distance(z)*fishcast.params['h']
-   def dchidz(z): return (chi(z+0.01)-chi(z))/0.01 
+   def dchidz(z): 
+      if z <= 0.02: return (chi(z+0.01)-chi(z))/0.01
+      return (-chi(z+0.02)+8*chi(z+0.01)-8*chi(z-0.01)+chi(z-0.02))/0.12 
    chi_star = chi(z_star)  
 
-   W_k = lambda z: 1.5*fishcast.params['omega_cdm']/fishcast.params['h']**2\
-                   *(100/299792.458)**2*(1+z)*chi(z)*(chi_star-chi(z))/chi_star
-    
-   def nonnorm_W_g(z):
-      result = fishcast.cosmo.Hubble(z)*(299792.458)/fishcast.params['h']
-      result *= compute_n(fishcast,z) * dchidz(z) * chi(z)**2
-      return result
-    
-   zs = np.linspace(zmin,zmax,1000)
-   dz = zs[1]-zs[0]
-   norm = sum([dz*dchidz(zz)*nonnorm_W_g(zz) for zz in zs])
-    
-   def W_g(z): return nonnorm_W_g(z)/norm
-    
-   zedges = np.linspace(zmin,zmax,2) # 2 is the number of z bins in the integral approximation
-   dz = zedges[1]-zedges[0]
-   zs = (zedges[1:]+zedges[:-1])/2.
-    
-   P = np.array([compute_real_space_cross_power(fishcast, X, Y, zz, gamma=gamma, b=b, bE2=bE2, bEs=bEs, 
-                                                  alpha0=alpha0, alpha2=alpha2, alpha4=alpha4,sn=sn,sn2=sn2,
-                                                  f=f, A_lin=A_lin, omega_lin=omega_lin, phi_lin=phi_lin)
-                                                  for zz in zs])
-    
-   #if X == Y and X == 'k':
-   #   result = lambda ell: sum([dz*dchidz(zz)*W_k(zz)**2*P[i]((ell+0.5)/chi(zz))/chi(zz)**2 for i,zz in enumerate(zs)])
-   #   return np.array([result(l) for l in fishcast.ell])
+   # CMB lensing convergence kernel
+   W_k = lambda z: 1.5*(fishcast.params['omega_cdm']+fishcast.params['omega_b'])/\
+                   fishcast.params['h']**2*(1/2997.92458)**2*(1+z)*chi(z)*\
+                   (chi_star-chi(z))/chi_star
    
-   if X == Y and X == 'g':
-      result = lambda ell: sum([dz*dchidz(zz)*W_g(zz)**2*P[i]((ell+0.5)/chi(zz))/chi(zz)**2 for i,zz in enumerate(zs)])
-      return np.array([result(l) for l in fishcast.ell])
+   # Galaxy kernel (arbitrary normalization)
+   def nonnorm_Wg(z):
+      result = fishcast.cosmo.Hubble(z)
+      try:
+         number_density = compute_n(fishcast,z)
+      except:
+         if X == Y and X == 'k': number_density = 10
+         else: raise Exception('Attemped to integrate outside of \
+                                specificed n(z) range')
+      if fishcast.experiment.HI: number_density = number_density[0]
+      result *= number_density * dchidz(z) * chi(z)**2 
+      return result
+  
+   zs = np.linspace(zmin,zmax,Nzsteps)
+   chis = np.array([chi(z) for z in zs])
+   Wg = np.array([nonnorm_Wg(z) for z in zs])
+   Wg /= simps(Wg,x=chis)
+   Wk = np.array([W_k(z) for z in zs])
+   if X == Y and X == 'k': kern = Wk**2/chis**2
+   elif X == Y and X == 'g': kern = Wg**2/chis**2
+   else: kern = Wg*Wk/chis**2
+   if Nzeff == 'auto': Nzeff = ceil((zmax-zmin)/maxDz)
+   mask = [(zs < np.linspace(zmin,zmax,Nzeff+1)[1:][i])*\
+           (zs >= np.linspace(zmin,zmax,Nzeff+1)[:-1][i]) for i in range(Nzeff)]
+   mask[-1][-1] = True
+   zeff = np.array([simps(kern*zs*m,x=chis)/simps(kern*m,x=chis) for m in mask])
 
-   result = lambda ell: sum([dz*dchidz(zz)*W_k(zz)*W_g(zz)*P[i]((ell+0.5)/chi(zz))/chi(zz)**2 for i,zz in enumerate(zs)])
+   bz = lambda z: compute_b(fishcast,z) * b/b_fid
+   b2z = lambda z: 8*(compute_b(fishcast,z)-1)/21 * b2/b2_fid
+   bsz = lambda z: -2*(compute_b(fishcast,z)-1)/7 * bs/bs_fid
+   alpha0z = lambda z: (1.22 + 0.24*compute_b(fishcast,z)**2*(z-5.96)) * alpha0/alpha0_fid
+   def Nz(z):
+      if not fishcast.experiment.HI: return 1/compute_n(fishcast,z) * N/N_fid
+      else: return 1/compute_n(fishcast,z)[0] * N/N_fid
+
+   # calculate P_XY 
+   if not noise: P = [compute_real_space_cross_power(
+                 fishcast, X, Y, zz, gamma=gamma, b=bz(zz), 
+                 b2=b2z(zz),bs=bsz(zz),alpha0=alpha0z(zz),alphax=alphax,N=Nz(zz)) for zz in zeff]
+
+   if noise: P = [fishcast.get_f_at_fixed_mu(np.ones(fishcast.Nk*fishcast.Nmu)/\
+                  compute_n(fishcast, zz),0) for zz in zeff]
+   P = np.array(P)
+
+   def result(ell):
+      kval = (ell+0.5)/chis
+      integrands = np.array([kern*P[i](kval) for i in range(Nzeff)])*mask
+      integrand = np.sum(integrands,axis=0)
+      return simps(integrand,x=chis)
+   
    return np.array([result(l) for l in fishcast.ell])
     
 
-def compute_recon_power_spectrum(fishcast, z, b=-1., bE2=0., bEs=0., alpha0=0., alpha2=0., alpha4=0.,
-                                  sn=0.,sn2=0.,f=-1.):
+def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
    '''
-   Needs to be checked. Also, should check that my modification of velocileptors is ok.
+   Returns the reconstructed power spectrum, following Stephen's paper.
    '''
-   bfid = compute_b(fishcast,z)
-   if b == -1.: b = bfid
-   if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
+   if b == -1.: b = compute_b(fishcast,z)
+   if b2 == -1: b2 = 8*(b-1)/21
+   if bs == -1: bs = -2*(b-1)/7
+   noise = 1/compute_n(fishcast,z)
+   if fishcast.experiment.HI: noise = noise[0]
+   if N is None: N = 1/compute_n(fishcast,z)
     
-   b1 = b-1.
-   b2 = bE2 + 8*(bfid-b)/21 # these factors keep b2 and bs fixed when varying b
-   bs = bEs - 2*(bfid-b)/7
+   bL1 = b-1.
+   bL2 = b2-8*(b-1)/21
+   bLs = bs+2*(b-1)/7
     
    K,MU = fishcast.k,fishcast.mu
-
+   h = fishcast.params['h']
    klin = np.logspace(np.log10(min(K)),np.log10(max(K)),fishcast.Nk)
-   plin = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in klin])
+   mulin = MU.reshape((fishcast.Nk,fishcast.Nmu))[0,:]
+   plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin])
     
    zelda = Zeldovich_Recon(klin,plin,R=15)
 
    def Precon(nu):
-      # k, za, b1, b1^2, b2, b1b2, b2^2, bs, b1bs, b2bs, bs^2
-      zelda.make_pddtable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=fishcast.Nk)
-      zelda.make_pdstable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=fishcast.Nk)
-      zelda.make_psstable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=fishcast.Nk)
+      zelda.make_pddtable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=500)
+      zelda.make_pdstable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=500)
+      zelda.make_psstable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=500)
         
-      dd_factors = np.array([0, 1, b1, b1**2, b2, b1*b2, b2**2, bs, b1*bs, b2*bs, bs**2])
-      ss_factors = np.array([0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0])
-      ds_factors = np.array([0, 1, 0.5*b1, 0, 0.5*b2, 0, 0, 0.5*bs, 0, 0, 0])
-        
-      recon_table = np.sum(zelda.pktable_dd*dd_factors + zelda.pktable_ss*ss_factors -\
-                           2*zelda.pktable_ds*ds_factors, axis=1)
-   mus = self.mu.reshape(self.Nk,self.Nmu)[0] 
-   result = np.array([Precon(mu) for mu in mus]).T
-   return result.flatten()
+      bias_factors = np.array([0, 1, bL1, bL1**2, bL2, bL1*bL2, bL2**2, bLs, bL1*bLs, bL2*bLs, bLs**2])
+      kSparse = zelda.pktable_dd[:,0]
+      recon_table = np.sum((zelda.pktable_dd + zelda.pktable_ss -2*zelda.pktable_ds)*bias_factors, axis=1)
+      zeldovich = zelda.pktable_dd[:,1] + zelda.pktable_ss[:,1] -2*zelda.pktable_ds[:,1]
+      result = zeldovich 
+      return Spline(kSparse,result)(klin)
+
+   # Assume that P(k,mu) = A(k) + B(k) mu^2 + C(k) mu^4
+   # find A,B,C then interpolate
+   P1,P2,P3 = Precon(0),Precon(0.5),Precon(1)
+   A,B,C = P1, -(P3 - 16*P2 + 15*P1)/3, 4*(P3 - 4*P2 + 3*P1)/3
+   Pk = lambda mu: A + B*mu**2 + C*mu**4
+   result = np.array([Pk(mu) for mu in mulin]).T 
+   return result.flatten() + N
+   
+   # CHECK THIS BIT OF CODE AS WELL, SPECIFICALLY THE INTERPOLATION IN MU

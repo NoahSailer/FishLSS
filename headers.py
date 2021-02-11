@@ -13,7 +13,7 @@ from classy import Class
 from experiment import *
 from fisherForecast import *
 import sys
-from LPT.moment_expansion_fftw import MomentExpansion
+from velocileptors.LPT.lpt_rsd_fftw import LPT_RSD
 import scipy
 
 from bao_recon.loginterp import loginterp
@@ -40,7 +40,7 @@ matplotlib.rcParams['axes.labelsize'] = 30
 matplotlib.rcParams['xtick.labelsize'] = 25 
 matplotlib.rcParams['ytick.labelsize'] = 25
 matplotlib.rcParams['legend.fontsize'] = 25
-matplotlib.rcParams['legend.title_fontsize'] = 25
+#matplotlib.rcParams['legend.title_fontsize'] = 25
 matplotlib.rcParams['xtick.major.size'] = 10
 matplotlib.rcParams['ytick.major.size'] = 10
 matplotlib.rcParams['xtick.minor.size'] = 5
