@@ -22,7 +22,7 @@ class LPT_RSD:
     '''
 
     def __init__(self, k, p, third_order = True, shear=True, one_loop=True,\
-                 kIR = None, cutoff=10, jn=5, N = 2000, threads=1, extrap_min = -5, extrap_max = 3):
+                 kIR = None, cutoff=2, jn=5, N = 2000, threads=1, extrap_min = -5, extrap_max = 3): 
 
         self.N = N
         self.extrap_max = extrap_max

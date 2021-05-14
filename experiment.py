@@ -12,14 +12,16 @@ class experiment(object):
                 zedges=None,            # Optional: Edges of redshift bins. Default is evenly-spaced bins.
                 fsky=0.5,               # Fraction of sky observed
                 sigma_z=0.0,            # Redshift error sz/(1+z)
-                n=12.,                  # Galaxy number density, float (constant n) or function of z
+                n=1e-3,                 # Galaxy number density, float (constant n) or function of z
                 b=1.5,                  # Galaxy bias, float (constant b) or function of z
+                b2=None,                #
                 LBG=False,              # 
                 HI=False,               # 
                 Halpha=False,           # 
                 ELG=False,              #
                 Euclid=False,           #
                 MSE=False,              # 
+                Roman=False,            #
                 custom_n=False,         #
                 custom_b=False,         #
                 pesimistic=False,       # HI survey: specifies the k-wedge 
@@ -42,12 +44,14 @@ class experiment(object):
       # If the bias is not a float, assumed to be a function of z
       if not isinstance(b, float): self.b = b
       else: self.b = lambda z: b + 0.*z
+      self.b2 = b2
       self.LBG = LBG
       self.HI = HI
       self.Halpha = Halpha
       self.ELG = ELG
       self.Euclid = Euclid
       self.MSE = MSE
+      self.Roman = Roman
       self.custom_n = custom_n
       self.custom_b = custom_b
       self.Ndetectors = Ndetectors

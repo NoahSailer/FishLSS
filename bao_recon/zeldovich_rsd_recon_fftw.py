@@ -584,7 +584,7 @@ class Zeldovich_Recon:
 
     # Compute multipoles directly
 
-    def make_pltable(self,f, D = 1,ngauss = 2, kv = None, kmin = 1e-3, kmax = 0.5, nk = 30, nmax=8, method = 'Pre-Recon', a_perp = 1, a_par = 1):
+    def make_pltable(self,f, D = 1,ngauss = 3, kv = None, kmin = 1e-3, kmax = 0.5, nk = 30, nmax=8, method = 'Pre-Recon', a_perp = 1, a_par = 1):
         ''' Make a table of the monopole and quadrupole in k space.
             Using gauss legendre integration.
             With a_perp and a_par, this gives the observed (and not ``true'') multipoles.'''

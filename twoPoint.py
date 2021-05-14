@@ -8,26 +8,14 @@ from twoPointNoise import *
 from scipy.integrate import simps
 from math import ceil
 from scipy.interpolate import InterpolatedUnivariateSpline as Spline
+from scipy.special import legendre
 
-
-def compute_matter_power_spectrum(fishcast, z, linear=False):
-   '''
-   Computes the cdm + baryon power spectrum for a given cosmology
-   at redshift z. By default returns the linear power spectrum, with
-   an option to return the Halofit guess for the nonlinear power
-   spectrum.
-   Returns an array of length Nk*Nmu. 
-   '''
-   kk = np.logspace(np.log10(fishcast.kmin),np.log10(fishcast.kmax),fishcast.Nk)
-   if linear: pmatter = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
-   else: pmatter = np.array([fishcast.cosmo.pk_cb(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
-   return np.repeat(pmatter,fishcast.Nmu)
-
+#################################################################################################
+# Biases for various surveys and probes.
 
 def LBGb(fishcast,z):
    '''
-   Equation 2.7 of Wilson and White 2019. Returns the bias of
-   LBGs.
+   Equation 2.7 of Wilson and White 2019. 
    '''
    zs = np.array([2.,3.,3.8,4.9,5.9])
    muv = np.array([24.2,24.7,25.4,25.5,25.8])
@@ -55,25 +43,43 @@ def EuclidB(z):
    b_interp = interp1d(zs, b, kind='linear', bounds_error=False, fill_value=0.)
    return b_interp(z) 
 
+def Romanb(z): return 1.1*z+0.3
 
 def ELGb(fishcast,z):
    D = fishcast.cosmo_fid.scale_independent_growth_factor(z)
    return 0.84/D
 
-
 def MSEb(fishcast,z):
+   '''
+   Constant clustering approximation.
+   '''
    D = fishcast.cosmo_fid.scale_independent_growth_factor(z)
    D0 = fishcast.cosmo_fid.scale_independent_growth_factor(0)
    return D0/D
 
-
 def HIb(z): return castorinaBias(z)
-
     
+def compute_b(fishcast,z):
+   '''
+   Quick way of getting the bias. 
+   '''
+   exp = fishcast.experiment
+   custom = exp.custom_b
+   if exp.LBG    and not custom: return LBGb(fishcast,z)
+   if exp.HI     and not custom: return HIb(z)
+   if exp.Halpha and not custom: return hAlphaB(z)
+   if exp.ELG    and not custom: return ELGb(fishcast,z)
+   if exp.Euclid and not custom: return EuclidB(z) 
+   if exp.MSE    and not custom: return MSEb(fishcast,z)
+   if exp.Roman  and not custom: return Romanb(z)
+   return exp.b(z)
+
+#################################################################################################
+# scale-dependent growth rate (I'm not using this function anywhere)
+
 def compute_f(fishcast, z, step=0.01):
    '''
-   Returns the logarithmic derivative of the linear growth rate. Calculated
-   from taking a derivative of the power spectrum.
+   Returns the scale-dependent growth factor.
    '''
    p_hi = compute_matter_power_spectrum(fishcast,z=z+step)
    p_higher = compute_matter_power_spectrum(fishcast,z=z+2.*step)
@@ -81,15 +87,22 @@ def compute_f(fishcast, z, step=0.01):
    dPdz = (p_fid - (4./3.) * p_hi + (1./3.) * p_higher) / ((-2./3.)*step)
    return -(1.+z) * dPdz / (2. * p_fid)
 
+#################################################################################################
+# functions for calculating P_{mm}(k,mu), P_{gg}(k,mu), P_{XY}(k), C^{XY}_\ell, and the smoothed
+# power spectrum
 
-def compute_b(fishcast,z):
-   if fishcast.experiment.LBG and not fishcast.experiment.custom_b: return LBGb(fishcast,z)
-   if fishcast.experiment.HI and not fishcast.experiment.custom_b: return HIb(z)
-   if fishcast.experiment.Halpha and not fishcast.experiment.custom_b: return hAlphaB(z)
-   if fishcast.experiment.ELG and not fishcast.experiment.custom_b: return ELGb(fishcast,z)
-   if fishcast.experiment.Euclid and not fishcast.experiment.custom_b: return EuclidB(z) 
-   if fishcast.experiment.MSE and not fishcast.experiment.custom_b: return MSEb(fishcast,z)
-   return fishcast.experiment.b(z)
+def compute_matter_power_spectrum(fishcast, z, linear=False):
+   '''
+   Computes the cdm + baryon power spectrum for a given cosmology
+   at redshift z. By default returns the linear power spectrum, with
+   an option to return the Halofit guess for the nonlinear power
+   spectrum.
+   Returns an array of length Nk*Nmu. 
+   '''
+   kk = np.logspace(np.log10(fishcast.kmin),np.log10(fishcast.kmax),fishcast.Nk)
+   if linear: pmatter = np.array([fishcast.cosmo.pk_cb_lin(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   else: pmatter = np.array([fishcast.cosmo.pk_cb(k*fishcast.params['h'],z)*fishcast.params['h']**3. for k in kk])
+   return np.repeat(pmatter,fishcast.Nmu)
 
 
 def get_smoothed_p(fishcast,z,klin,plin,division_factor=2.):
@@ -133,16 +146,20 @@ def get_smoothed_p(fishcast,z,klin,plin,division_factor=2.):
 def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1, 
                                   alpha0=-1, alpha2=0, alpha4=0.,alpha6=0.,
                                   N=None,N2=-1,N4=0.,f=-1., A_lin=-1., 
-                                  omega_lin=-1., phi_lin=-1.,kIR=0.2):
+                                  omega_lin=-1., phi_lin=-1.,kIR=0.2,     
+                                  moments=False,bL1=None,bL2=None,bLs=None,
+                                  one_loop=True):
    '''
    Computes the nonlinear redshift-space power spectrum P(k,mu) [Mpc/h]^3 
    of the matter tracer. Returns an array of length Nk*Nmu. 
    '''
+   exp = fishcast.experiment
    if fishcast.recon: 
       return compute_recon_power_spectrum(fishcast,z,b=b,b2=b2,bs=bs,N=N)
 
    if b == -1.: b = compute_b(fishcast,z)
-   if b2 == -1: b2 = 8*(b-1)/21
+   if b2 == -1 and exp.b2 is not None: b2 = exp.b2(z) 
+   elif b2 == -1: b2 = 8*(b-1)/21
    if bs == -1: bs = -2*(b-1)/7
    if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
    if A_lin == -1.: A_lin = fishcast.A_lin
@@ -150,9 +167,10 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    if phi_lin == -1.: phi_lin = fishcast.phi_lin 
    if alpha0 == -1: alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
    if N is None: N = 1/compute_n(fishcast,z)
+   #
    noise = 1/compute_n(fishcast,z)
-   if fishcast.experiment.HI: noise = noise[0]
-   sigv = fishcast.experiment.sigv
+   if exp.HI: noise = noise[0] # only keep the shot noise piece
+   sigv = exp.sigv
    Hz = fishcast.Hz_fid(z)
    if N2 == -1: N2 = -noise*((1+z)*sigv/fishcast.Hz_fid(z))**2
     
@@ -160,7 +178,7 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    MU = fishcast.mu
    h = fishcast.params['h']
    klin = np.array([K[i*fishcast.Nmu] for i in range(fishcast.Nk)])
-   plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin])
+   plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin]) 
    plin *= (1. + A_lin * np.sin(omega_lin * klin + phi_lin))
 
    if fishcast.smooth: plin = get_smoothed_p(fishcast,z)
@@ -169,39 +187,29 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
       # If not using velocileptors, use linear theory
       # and approximate RSD with Kaiser.
       pmatter = np.repeat(plin,fishcast.Nmu)
-      result = pmatter * (b+f*MU**2.)**2. 
+      result = pmatter * (b+f*MU**2.)**2. + N
       return result
-    
-   bL1 = b-1.
-   bL2 = b2 - 8*(b-1)/21 
-   bLs = bs + 2*(b-1)/7
+   
+   if bL1 is None: bL1 = b-1.
+   if bL2 is None: bL2 = b2 - 8*(b-1)/21 
+   if bLs is None: bLs = bs + 2*(b-1)/7
    
    biases = [bL1,bL2,bLs,0.]
    cterms = [alpha0,alpha2,alpha4,alpha6]
    stoch  = [0,N2,N4]
    pars   = biases + cterms + stoch
 
-   lpt = LPT_RSD(klin,plin,kIR=kIR)
+   lpt = LPT_RSD(klin,plin,kIR=kIR,one_loop=one_loop)
    lpt.make_pltable(f,kmin=min(klin),kmax=max(klin),nk=len(klin))
    k,p0,p2,p4 = lpt.combine_bias_terms_pkell(pars)
-   p0 = np.repeat(p0,fishcast.Nmu)
-   p2 = np.repeat(p2,fishcast.Nmu)
+   if moments: return k,p0,p2,p4
+   p0 = np.repeat(p0,fishcast.Nmu) 
+   p2 = np.repeat(p2,fishcast.Nmu) 
    p4 = np.repeat(p4,fishcast.Nmu)
    pkmu = p0+0.5*(3*MU**2-1)*p2+0.125*(35*MU**4-30*MU**2+3)*p4 + N
    del lpt
    return pkmu 
-   
-   #N = 4
-   #mus = np.linspace(0,1,N)
-   #ps = np.array([pkw(mu) for mu in mus])
-   #A = np.array([[mu**(2*i) for i in range(N)] for mu in mus])
-   #Ainv = np.linalg.inv(A)
-   #C = np.dot(Ainv,ps)
 
-   #def p_interp(mu):
-   #   x = np.array([mu**(2*i) for i in range(N)])
-   #   return np.dot(x,C)
-   
 
 def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1., 
                                    b2=-1,bs=-1,alpha0=-1,alphax=0,N=None):
@@ -225,16 +233,20 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
    plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin])
     
    if X == Y and X == 'k': 
-      pmm = np.array([fishcast.cosmo.pk_cb(k*h,z)*h**3. for k in klin])
-      pmm *= (bk+1)**2
-      return interp1d(klin, pmm, kind='linear', bounds_error=False, fill_value=0.) 
-   
+      plin = np.array([fishcast.cosmo.pk_lin(k*h,z)*h**3. for k in klin])
+      cleft = CLEFT(klin,plin)
+      cleft.make_ptable(kmin=min(klin),kmax=max(klin),nk=fishcast.Nk)
+      kk,pmm = cleft.combine_bias_terms_pk(0,0,0,0,0,0) 
+      if z>10: pmm=np.array([fishcast.cosmo.pk(k*h,z)*h**3. for k in klin])
+      return interp1d(kk, pmm, kind='linear', bounds_error=False, fill_value=0.)
+    
    cleft = CLEFT(klin,plin)
    cleft.make_ptable(kmin=min(klin),kmax=max(klin),nk=fishcast.Nk)
    
    bL1 = b-1.
    bL2 = b2 - 8*(b-1)/21 
    bLs = bs + 2*(b-1)/7
+    
     
    if X == Y and X == 'g':
       kk,pgg = cleft.combine_bias_terms_pk(bL1,bL2,bLs,alpha0,0,N) 
@@ -317,6 +329,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    elif X == Y and X == 'g': kern = Wg**2/chis**2
    else: kern = Wg*Wk/chis**2
    if Nzeff == 'auto': Nzeff = ceil((zmax-zmin)/maxDz)
+   if Nzeff > Nzsteps: Nzeff = Nzsteps
    mask = [(zs < np.linspace(zmin,zmax,Nzeff+1)[1:][i])*\
            (zs >= np.linspace(zmin,zmax,Nzeff+1)[:-1][i]) for i in range(Nzeff)]
    mask[-1][-1] = True
@@ -327,6 +340,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    bsz = lambda z: -2*(compute_b(fishcast,z)-1)/7 * bs/bs_fid
    alpha0z = lambda z: (1.22 + 0.24*compute_b(fishcast,z)**2*(z-5.96)) * alpha0/alpha0_fid
    def Nz(z):
+      if X == Y and X == 'k': return 0
       if not fishcast.experiment.HI: return 1/compute_n(fishcast,z) * N/N_fid
       else: return 1/compute_n(fishcast,z)[0] * N/N_fid
 
@@ -358,6 +372,7 @@ def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
    noise = 1/compute_n(fishcast,z)
    if fishcast.experiment.HI: noise = noise[0]
    if N is None: N = 1/compute_n(fishcast,z)
+   f = fishcast.cosmo.scale_independent_growth_factor_f(z) 
     
    bL1 = b-1.
    bL2 = b2-8*(b-1)/21
@@ -371,24 +386,13 @@ def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
     
    zelda = Zeldovich_Recon(klin,plin,R=15)
 
-   def Precon(nu):
-      zelda.make_pddtable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=500)
-      zelda.make_pdstable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=500)
-      zelda.make_psstable(f,nu,D=1,kmin=min(K),kmax=max(K),nk=500)
-        
-      bias_factors = np.array([0, 1, bL1, bL1**2, bL2, bL1*bL2, bL2**2, bLs, bL1*bLs, bL2*bLs, bLs**2])
-      kSparse = zelda.pktable_dd[:,0]
-      recon_table = np.sum((zelda.pktable_dd + zelda.pktable_ss -2*zelda.pktable_ds)*bias_factors, axis=1)
-      zeldovich = zelda.pktable_dd[:,1] + zelda.pktable_ss[:,1] -2*zelda.pktable_ds[:,1]
-      result = zeldovich 
-      return Spline(kSparse,result)(klin)
-
-   # Assume that P(k,mu) = A(k) + B(k) mu^2 + C(k) mu^4
-   # find A,B,C then interpolate
-   P1,P2,P3 = Precon(0),Precon(0.5),Precon(1)
-   A,B,C = P1, -(P3 - 16*P2 + 15*P1)/3, 4*(P3 - 4*P2 + 3*P1)/3
-   Pk = lambda mu: A + B*mu**2 + C*mu**4
-   result = np.array([Pk(mu) for mu in mulin]).T 
+   kSparse,p0ktable,p2ktable,p4ktable = zelda.make_pltable(f,ngauss=3,kmin=min(K),kmax=max(K),nk=500,method='RecSym')
+   bias_factors = np.array([1, bL1, bL1**2, bL2, bL1*bL2, bL2**2, bLs, bL1*bLs, bL2*bLs, bLs**2,0,0,0])
+   p0Sparse = np.sum(p0ktable*bias_factors, axis=1)
+   p2Sparse = np.sum(p2ktable*bias_factors, axis=1)
+   p4Sparse = np.sum(p4ktable*bias_factors, axis=1)
+   p0,p2,p4 = Spline(kSparse,p0Sparse)(klin),Spline(kSparse,p2Sparse)(klin),Spline(kSparse,p4Sparse)(klin)
+   l0,l2,l4 = legendre(0),legendre(2),legendre(4)
+   Pk = lambda mu: p0*l0(mu) + p2*l2(mu) + p4*l4(mu)
+   result = np.array([Pk(mu) for mu in mulin]).T
    return result.flatten() + N
-   
-   # CHECK THIS BIT OF CODE AS WELL, SPECIFICALLY THE INTERPOLATION IN MU

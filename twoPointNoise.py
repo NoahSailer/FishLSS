@@ -17,7 +17,7 @@ phi = interp1d(zs, phi, kind='linear', bounds_error=False, fill_value=0.)
 alpha = np.array([-1.6,-1.78,-1.57,-1.60,-1.87])
 alpha = interp1d(zs, alpha, kind='linear', bounds_error=False, fill_value=0.)
 
-def compute_covariance_matrix(fishcast, zbin_index):
+def compute_covariance_matrix(fishcast, zbin_index, nratio=1):
    '''
    Covariance is diagonal. Returns an array of length Nk*Nmu. 
    '''
@@ -28,40 +28,70 @@ def compute_covariance_matrix(fishcast, zbin_index):
    Hz = fishcast.cosmo_fid.Hubble(z)*(299792.458)/fishcast.params['h']
    sigma_parallel = (3.e5)*(1.+z)*fishcast.experiment.sigma_z/Hz
    number_density = number_density * np.maximum(np.exp(-fishcast.k**2. * fishcast.mu**2. * sigma_parallel**2.),1.e-20)
-   return prefactor * (fishcast.P_fid[zbin_index]-1/compute_n(fishcast, z)+1/number_density)**2.
+   # this assumes that the fiducial exeriment doesn't have any redshift errors, come up with a more general fix
+   P_fid = fishcast.P_fid[zbin_index]
+   if fishcast.recon: P_fid = fishcast.P_recon_fid[zbin_index]
+   C = prefactor * (P_fid-1/compute_n(fishcast, z)+nratio/number_density)**2.
+   return np.maximum(C,1e-50) # avoiding numerical nonsense with possible 0's
+
 
 def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO'):
    '''
-   [[Ckk , Ckg1 , Gkg2 ],
-    [Ckg1, Cg1g1, 0    ],
-    [Ckg2, 0    , Cg2g2]]
    '''
    n = fishcast.experiment.nbins
    zs = fishcast.experiment.zcenters
    zes = fishcast.experiment.zedges
    # Lensing noise
-   if CMB == 'SO': data = np.genfromtxt('input/nlkk_v3_1_0deproj0_SENS2_fsky0p4_it_lT30-3000_lP30-5000.dat')
-   else: data = np.genfromtxt('input/S4_kappa_deproj0_sens0_16000_lT30-3000_lP30-5000.dat')
-   l,N = data[:,0],data[:,7]
-   Nkk_interp = interp1d(l,N,kind='linear')
+   if CMB == 'SO': 
+      data = np.genfromtxt('input/nlkk_v3_1_0deproj0_SENS2_fsky0p4_it_lT30-3000_lP30-5000.dat')
+      l,N = data[:,0],data[:,7]
+   elif CMB == 'Planck': 
+      data = np.genfromtxt('input/nlkk_planck.dat')
+      l,N = data[:,0],data[:,1]
+   elif CMB == 'Perfect':
+      l,N = fishcast.ell, fishcast.ell*0
+   else: 
+      data = np.genfromtxt('input/S4_kappa_deproj0_sens0_16000_lT30-3000_lP30-5000.dat')
+      l,N = data[:,0],data[:,7]
+   
+   Nkk_interp = interp1d(l,N,kind='linear',bounds_error=False, fill_value=1)
    l = fishcast.ell  ; Nkk = Nkk_interp(l)
-   # Galaxy shot noise
-   Nggs = [twoPoint.compute_lensing_Cell(fishcast,'g','g',zes[i],zes[i+1],noise=True) for i in range(n)] 
-   # Create covariance object
-   C = np.zeros((n+1,n+1,len(fishcast.ell)))
    # Cuttoff high ell by blowing up the covariance for ell > ellmax
    chi = lambda z: (1.+z)*fishcast.cosmo_fid.angular_distance(z)*fishcast.params['h']
    ellmaxs =  np.array([kmax_knl*chi(z)/np.sqrt(fishcast.Sigma2(z)) for z in zs])
    constraint = np.ones((n,len(l)))
    idx = np.array([np.where(l)[0] >= ellmax for ellmax in ellmaxs])
-   for i in range(n): constraint[i][idx[i]] *= 1e20
-   # build covariance
-   C[0,0] = fishcast.Ckk_fid + Nkk
+   for i in range(n): constraint[i][idx[i]] *= 1e10
+   # build covariance matrix
+   C = np.zeros((2*n+1,2*n+1,len(l)))
+   fsky = min(fishcast.experiment.fsky,0.4)
+   #
+   Ckk = fishcast.Ckk_fid
+   # kk, kk
+   C[0,0] = 2*(Ckk + Nkk)**2/(2*l+1)
    for i in range(n):
-      C[i+1,0] = fishcast.Ckg_fid[i] * constraint[i]
-      C[0,i+1] = fishcast.Ckg_fid[i] * constraint[i]
-      C[i+1,i+1] = (fishcast.Cgg_fid[i]) * constraint[i] #  + Nggs[i]
-   return C
+      Ckgi = fishcast.Ckg_fid[i]
+      # kk, kg
+      C[i+1,0] = 2*(Ckk + Nkk) * Ckgi/(2*l+1)*constraint[i]
+      C[0,i+1] = C[i+1,0]
+      # kk, gg
+      C[i+1+n,0] = 2*Ckgi**2/(2*l+1)*constraint[i]
+      C[0,i+1+n] = C[i+1+n,0]
+      for j in range(n):
+         Ckgj = fishcast.Ckg_fid[j]
+         Cgigi = fishcast.Cgg_fid[i]
+         Cgjgj = fishcast.Cgg_fid[j]
+         # kgi, kgj
+         C[i+1,j+1] = Ckgi*Ckgj*constraint[i]*constraint[j]
+         if i == j: C[i+1,j+1] += (Ckk + Nkk)*Cgigi*constraint[i]
+         C[i+1,j+1] /= 2*l+1
+         # gigi, gjgj
+         if i == j: C[i+1+n,j+1+n] = 2*Cgigi**2 / (2*l+1)*constraint[i]
+         # kgi, gjgj
+         if i == j: 
+            C[i+1,i+1+n] = 2*Cgigi*Ckgi/(2*l+1)*constraint[i]
+            C[i+1+n,i+1] = C[i+1,i+1+n]
+   return C/fsky
       
 
 def compute_n(fishcast, z):
@@ -76,6 +106,7 @@ def compute_n(fishcast, z):
    if fishcast.experiment.HI and not fishcast.experiment.custom_n: return HIneff(fishcast,z)
    if fishcast.experiment.Euclid and not fishcast.experiment.custom_n: return Euclidn(z)
    if fishcast.experiment.MSE and not fishcast.experiment.custom_n: return MSEn(z)
+   if fishcast.experiment.Roman and not fishcast.experiment.custom_n: return Romann(fishcast,z)
    return fishcast.experiment.n(z)
     
     
@@ -88,12 +119,12 @@ def Muv(fishcast, z, m=24.5):
    return result
 
 
-def LBGn(fishcast, z):
+def LBGn(fishcast, z, m=24.5):
    '''
    Equation 2.5 of Wilson and White 2019. Return number
    density of LBGs at redshift z in units of Mpc^3/h^3.
    '''
-   upper_limit = Muv(fishcast,z)
+   upper_limit = Muv(fishcast,z,m=m)
    integrand = lambda M: (np.log(10.)/2.5) * phi(z) * 10.**( -0.4 * (1.+alpha(z)) * (M-Muvstar(z)) )*\
                              np.exp(-10.**(-0.4 * (M-Muvstar(z)) ) )
    
@@ -112,6 +143,20 @@ def ELGn(fishcast, z):
    n = [n[0]] + n
    n = n + [n[-1]]
    n = np.array(n)
+   n_interp = interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)
+   return float(n_interp(z))
+
+
+def Romann(fishcast, z):
+   zs = np.linspace(1.05,2.95,20)
+   dNdz = np.array([6160,5907,4797,5727,5147,4530,4792,3870,2857,2277,1725,1215,1642,1615,1305,1087,850,795,847,522])
+   N = 41252.96125 * dNdz * 0.1 # number of emitters in dz=0.1 across the whole sky
+   volume = np.array([((1.+z+0.05)*fishcast.cosmo_fid.angular_distance(z+0.05))**3. for z in zs])
+   volume -= np.array([((1.+z-0.05)*fishcast.cosmo_fid.angular_distance(z-0.05))**3. for z in zs])
+   volume *= 4.*np.pi*fishcast.params_fid['h']**3./3. # volume in Mpc^3/h^3
+   n = list(N/volume)
+   zs = np.array([zs[0]] + list(zs) + [zs[-1]])
+   n = np.array([n[0]] + n + [n[-1]])
    n_interp = interp1d(zs, n, kind='linear', bounds_error=False, fill_value=0.)
    return float(n_interp(z))
 
@@ -169,7 +214,7 @@ def nofl(x, hexpack=True, Nside=256, D=6):
       a,b,c,d,e=0.56981864, -0.52741196,  0.8358006 ,  1.66354748,  7.31776875
    else:
       # square packing
-      a,b,d,d,e=0.4847, -0.330,  1.3157,  1.5975,  6.8390
+      a,b,c,d,e=0.4847, -0.330,  1.3157,  1.5975,  6.8390
    xn=x/(Nside*D)
    n0=(Nside/D)**2
    res=n0*(a+b*xn)/(1+c*xn**d)*np.exp(-(xn)**e)
