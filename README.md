@@ -1,3 +1,5 @@
+[![](https://img.shields.io/badge/arXiv-2106.09713%20-red.svg)](https://arxiv.org/abs/2106.09713)
+
 # FishLSS
 
 Forecasting code for LSS surveys. Requires numpy, scipy, [pyFFTW](https://hgomersall.github.io/pyFFTW/), and [CLASS_EDE](https://github.com/mwt5345/class_ede): an 

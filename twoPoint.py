@@ -13,17 +13,17 @@ from scipy.special import legendre
 #################################################################################################
 # Biases for various surveys and probes.
 
-def LBGb(fishcast,z):
+def LBGb(fishcast,z,m=24.5):
    '''
    Equation 2.7 of Wilson and White 2019. 
    '''
-   zs = np.array([2.,3.,3.8,4.9,5.9])
-   muv = np.array([24.2,24.7,25.4,25.5,25.8])
-   muv = interp1d(zs, muv, kind='linear', bounds_error=False, fill_value=0.)
+   #zs = np.array([2.,3.,3.8,4.9,5.9])
+   #muv = np.array([24.2,24.7,25.4,25.5,25.8])
+   #muv = interp1d(zs, muv, kind='linear', bounds_error=False, fill_value=0.)
    A = lambda m: -0.98*(m-25.) + 0.11
    B = lambda m: 0.12*(m-25.) + 0.17
    def b(m): return A(m)*(1.+z)+B(m)*(1.+z)**2.
-   return b(24.5)
+   return b(m)
 
 def hAlphaB(z):
    '''
@@ -55,7 +55,8 @@ def MSEb(fishcast,z):
    '''
    D = fishcast.cosmo_fid.scale_independent_growth_factor(z)
    D0 = fishcast.cosmo_fid.scale_independent_growth_factor(0)
-   return D0/D
+   if z<=2.4: return D0/D
+   return LBGb(fishcast,z,m=24.5)
 
 def HIb(z): return castorinaBias(z)
     
@@ -169,7 +170,7 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    if N is None: N = 1/compute_n(fishcast,z)
    #
    noise = 1/compute_n(fishcast,z)
-   if exp.HI: noise = noise[0] # only keep the shot noise piece
+   if exp.HI: noise = castorinaPn(z) # only keep the shot noise piece
    sigv = exp.sigv
    Hz = fishcast.Hz_fid(z)
    if N2 == -1: N2 = -noise*((1+z)*sigv/fishcast.Hz_fid(z))**2
@@ -182,12 +183,21 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    plin *= (1. + A_lin * np.sin(omega_lin * klin + phi_lin))
 
    if fishcast.smooth: plin = get_smoothed_p(fishcast,z)
-
-   if not fishcast.velocileptors:
+    
+   if fishcast.linear2:
+      pmatter = np.repeat(plin,fishcast.Nmu)
+      result = pmatter * (b+f*MU**2.)**2.
+      result /= 1 - N2*(K*MU)**2/noise 
+      result += N   
+      return result
+    
+   if fishcast.linear:
       # If not using velocileptors, use linear theory
       # and approximate RSD with Kaiser.
       pmatter = np.repeat(plin,fishcast.Nmu)
-      result = pmatter * (b+f*MU**2.)**2. + N
+      result = pmatter * (b+f*MU**2.)**2.
+      result += N+N2*(K*MU)**2+N4*(K*MU)**4
+      result += pmatter*K**2*(alpha0+alpha2*MU**2+alpha4*MU**4)
       return result
    
    if bL1 is None: bL1 = b-1.
@@ -223,7 +233,7 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
    if alpha0 == -1: alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
    if N == None: 
       N = 1/compute_n(fishcast,z)
-      if fishcast.experiment.HI: N = N[0]
+      if fishcast.experiment.HI: N = castorinaPn(z)
    bk = (1+gamma)/2-1
    h = fishcast.params['h']
    
@@ -231,6 +241,11 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
     
    klin = np.array([K[i*fishcast.Nmu] for i in range(fishcast.Nk)])
    plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin])
+    
+    
+   ######################################################################################################## 
+   if fishcast.linear:
+      print('IMPLEMENT STUFF HERE')
     
    if X == Y and X == 'k': 
       plin = np.array([fishcast.cosmo.pk_lin(k*h,z)*h**3. for k in klin])
@@ -287,7 +302,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    bs_fid = -2*(b_fid-1)/7
    alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96) 
    N_fid = 1/compute_n(fishcast,zmid)
-   if fishcast.experiment.HI: N_fid = N_fid[0]
+   if fishcast.experiment.HI: N_fid = castorinaPn(zmid)
         
    if b == -1: b = b_fid
    if b2 == -1: b2 = b2_fid
@@ -316,7 +331,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
          if X == Y and X == 'k': number_density = 10
          else: raise Exception('Attemped to integrate outside of \
                                 specificed n(z) range')
-      if fishcast.experiment.HI: number_density = number_density[0]
+      if fishcast.experiment.HI: number_density = castorinaPn(z)
       result *= number_density * dchidz(z) * chi(z)**2 
       return result
   
@@ -342,7 +357,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    def Nz(z):
       if X == Y and X == 'k': return 0
       if not fishcast.experiment.HI: return 1/compute_n(fishcast,z) * N/N_fid
-      else: return 1/compute_n(fishcast,z)[0] * N/N_fid
+      else: return castorinaPn(z) * N/N_fid
 
    # calculate P_XY 
    if not noise: P = [compute_real_space_cross_power(
@@ -370,7 +385,7 @@ def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
    if b2 == -1: b2 = 8*(b-1)/21
    if bs == -1: bs = -2*(b-1)/7
    noise = 1/compute_n(fishcast,z)
-   if fishcast.experiment.HI: noise = noise[0]
+   if fishcast.experiment.HI: noise = castorinaPn(z)
    if N is None: N = 1/compute_n(fishcast,z)
    f = fishcast.cosmo.scale_independent_growth_factor_f(z) 
     

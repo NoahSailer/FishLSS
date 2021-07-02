@@ -4,18 +4,19 @@ import twoPoint
 from castorina import castorinaBias,castorinaPn
 import scipy
 
+
 '''
 Values and defintions from Table 3 of Wilson and White 2019.
 '''
 zs = np.array([2.,3.,3.8,4.9,5.9])
 Muvstar = np.array([-20.60,-20.86,-20.63,-20.96,-20.91])
-Muvstar = interp1d(zs, Muvstar, kind='linear', bounds_error=False, fill_value=0.)
+Muvstar = interp1d(zs, Muvstar, kind='linear', bounds_error=False,fill_value='extrapolate')
 muv = np.array([24.2,24.7,25.4,25.5,25.8])
-muv = interp1d(zs, muv, kind='linear', bounds_error=False, fill_value=0.)
+muv = interp1d(zs, muv, kind='linear', bounds_error=False,fill_value='extrapolate')
 phi = np.array([9.70,5.04,9.25,3.22,1.64])*0.001
-phi = interp1d(zs, phi, kind='linear', bounds_error=False, fill_value=0.)
+phi = interp1d(zs, phi, kind='linear', bounds_error=False,fill_value='extrapolate')
 alpha = np.array([-1.6,-1.78,-1.57,-1.60,-1.87])
-alpha = interp1d(zs, alpha, kind='linear', bounds_error=False, fill_value=0.)
+alpha = interp1d(zs, alpha, kind='linear', bounds_error=False,fill_value='extrapolate')
 
 def compute_covariance_matrix(fishcast, zbin_index, nratio=1):
    '''
@@ -91,7 +92,9 @@ def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO'):
          if i == j: 
             C[i+1,i+1+n] = 2*Cgigi*Ckgi/(2*l+1)*constraint[i]
             C[i+1+n,i+1] = C[i+1,i+1+n]
-   return C/fsky
+   C /= fsky
+   C[0,0] *= fsky/0.4
+   return C
       
 
 def compute_n(fishcast, z):
@@ -105,7 +108,7 @@ def compute_n(fishcast, z):
    if fishcast.experiment.ELG and not fishcast.experiment.custom_n: return ELGn(fishcast, z)
    if fishcast.experiment.HI and not fishcast.experiment.custom_n: return HIneff(fishcast,z)
    if fishcast.experiment.Euclid and not fishcast.experiment.custom_n: return Euclidn(z)
-   if fishcast.experiment.MSE and not fishcast.experiment.custom_n: return MSEn(z)
+   if fishcast.experiment.MSE and not fishcast.experiment.custom_n: return MSEn(fishcast,z)
    if fishcast.experiment.Roman and not fishcast.experiment.custom_n: return Romann(fishcast,z)
    return fishcast.experiment.n(z)
     
@@ -116,6 +119,15 @@ def Muv(fishcast, z, m=24.5):
    '''
    result = m - 5. * np.log10(fishcast.cosmo_fid.luminosity_distance(z)*1.e5)
    result += 2.5 * np.log10(1.+z)
+   return result
+
+
+def muv_from_Muv(fishcast, z, M):
+   '''
+   Equation 2.6 of Wilson and White 2019. Assumes a m=24.5 limit
+   '''
+   result = M + 5. * np.log10(fishcast.cosmo_fid.luminosity_distance(z)*1.e5)
+   result -= 2.5 * np.log10(1.+z)
    return result
 
 
@@ -196,10 +208,32 @@ def hAlphaN(fishcast, z):
    return n_interp(z)
 
 
-def MSEn(z):
-   zs = np.array([1.6,2.2,2.6,4.0])
-   ns = np.array([1.8,1.8,1.1,1.1])*1e-4
-   return interp1d(zs, ns, kind='linear', bounds_error=False, fill_value=0.)(z)
+def MSEn(fishcast,z,m=24.5):
+   # return ELG number density for z<2.4
+   if z <= 2.4: return 1.8e-4 
+   # interpolate figure 2 of https://arxiv.org/pdf/1903.03158.pdf to get efficiency
+   mags   = np.array([22.75, 23.25, 23.75, 24.25])
+   zs     = np.array([2.6,3.0,3.4,3.8])
+   blue   = np.array([[0.619,0.846,0.994], [0.452,0.745,0.962], [0.269,0.495,0.919], [0.102,0.327,0.908]])
+   orange = np.array([[0.582,0.780,0.981], [0.443,0.663,0.929], [0.256,0.481,0.849], [0.119,0.314,0.854]])
+   green  = np.array([[0.606,0.805,0.919], [0.486,0.708,0.815], [0.289,0.559,0.746], [0.146,0.363,0.754]])
+   red    = np.array([[0.624,0.752,0.934], [0.501,0.671,0.843], [0.334,0.552,0.689], [0.199,0.371,0.699]])
+   weight = np.array([0.4,0.3,0.3])
+   b,o = np.sum(blue*weight,axis=1),np.sum(orange*weight,axis=1)
+   g,r = np.sum(green*weight,axis=1),np.sum(red*weight,axis=1)
+   eff = np.array([b,o,r,g])
+   #
+   efficiency = interp2d(zs,mags,eff,kind='linear',bounds_error=False)
+   #
+   def integrand(M): 
+      result = (np.log(10.)/2.5) * phi(z) * 10.**( -0.4 * (1.+alpha(z)) * (M-Muvstar(z)) )
+      result *= np.exp(-10.**(-0.4 * (M-Muvstar(z)) ) )
+      m = muv_from_Muv(fishcast,z,M)
+      result *= efficiency(z,m)
+      return result
+   #
+   n = lambda m: scipy.integrate.quad(integrand, -200, Muv(fishcast,z,m=m))[0]
+   return n(m)
 
 
 def nofl(x, hexpack=True, Nside=256, D=6):

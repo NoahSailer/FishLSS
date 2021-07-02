@@ -34,7 +34,9 @@ class experiment(object):
       self.zmax = zmax
       self.nbins = nbins
       self.zedges = np.linspace(zmin,zmax,nbins+1)
-      if zedges is not None: self.zedges = zedges
+      if zedges is not None: 
+         self.zedges = zedges
+         self.nbins = len(zedges)-1
       self.zcenters = (self.zedges[1:]+self.zedges[:-1])/2.
       self.fsky = fsky
       self.sigma_z = sigma_z

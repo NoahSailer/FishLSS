@@ -29,13 +29,15 @@ class fisherForecast(object):
                 A_lin=0., 
                 omega_lin=0.01, 
                 phi_lin=np.pi/2., 
-                velocileptors=False,
+                velocileptors=True,
                 linear=False, 
+                linear2=False,
                 name='toy_model',
                 smooth=False,
                 AP=True,
                 recon=False,
-                ell=np.arange(10,1000,1)):
+                ell=np.arange(10,1000,1),
+                N2cut=0.2):
         
       self.kmin = kmin
       self.kmax = kmax
@@ -55,11 +57,13 @@ class fisherForecast(object):
       #
       self.velocileptors = velocileptors
       self.linear = linear
+      self.linear2 = linear2
       self.name = name
       self.smooth = smooth
       self.AP = AP
       self.recon = recon
       self.ell = ell
+      self.N2cut = N2cut
 
       self.experiment = None
       self.cosmo = None
@@ -120,7 +124,7 @@ class fisherForecast(object):
       self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) \
                                for i in range(len(experiment.zedges)-1)])
        
-      redshifts = np.linspace(self.experiment.zmin,self.experiment.zmax,1000)
+      redshifts = np.linspace(0,7,1000)
       Da_fid = np.array([self.cosmo.angular_distance(z) for z in redshifts])*self.params['h']
       Hz_fid = np.array([self.cosmo.Hubble(z)*(299792.458)/self.params['h'] for z in redshifts])
       rsd_fid = np.array([self.cosmo.get_current_derived_parameters(['rs_d'])['rs_d']*self.params['h'] for z in redshifts])
@@ -198,13 +202,13 @@ class fisherForecast(object):
       # Create a "k_parallel cut", removing modes whose sn2 term
       # is >= 20% of the total power
       def get_n(z):
-         if self.experiment.HI: return compute_n(self,z)[0]
+         if self.experiment.HI: return castorinaPn(z)
          return compute_n(self,z)
       sigv = self.experiment.sigv
       sn2 = (self.k*self.mu)**2*((1+z)*sigv/self.Hz_fid(z))**2/get_n(z)
       if zindex is not None: Ps = self.P_fid[zindex]
       else: Ps = compute_tracer_power_spectrum(self,z)
-      idx = np.where(sn2/Ps >= 0.2) ; idx2 = np.where(Ps <= 0)
+      idx = np.where(sn2/Ps >= self.N2cut) ; idx2 = np.where(Ps <= 0)
       kpar_cut = np.ones(self.Nk*self.Nmu)
       kpar_cut[idx] = 0 ; kpar_cut[idx2] = 0 
       return kpar_cut
@@ -234,8 +238,67 @@ class fisherForecast(object):
          integrand = (2*l+1)*p_reshaped[i,:]*scipy.special.legendre(l)(mu)
          result[i] = scipy.integrate.simps(integrand,x=mu)
       return result
-
-
+      
+      
+   def LegendreTransInv(self,pls):
+      '''
+      Given pls = [p0,p2,p4,...], returns P(k,mu). 
+      pn is an array of length Nk. P(k,mu) is an array 
+      of length Nk*Nmu.
+      '''
+      n = len(pls)
+      pls_repeat = np.zeros((n,self.Nk*self.Nmu))
+      legendre_polys = pls_repeat.copy()
+      for i in range(n): 
+         pls_repeat = np.repeat(pls[i],self.Nmu)
+         legendre_polys = scipy.special.legendre(2*i)(self.mu)
+      return np.sum(pls_repeat*legendre_polys,axis=0)
+      
+      
+   def dPdk(self,P):
+      # assumes that k is log spaced
+      P_reshaped = P.reshape((self.Nk,self.Nmu)) 
+      P_low  = np.roll(P_reshaped,1,axis=0)
+      P_low2 = np.roll(P_reshaped,2,axis=0)
+      P_low3 = np.roll(P_reshaped,3,axis=0) 
+      P_low4 = np.roll(P_reshaped,4,axis=0)
+      P_hi   = np.roll(P_reshaped,-1,axis=0)
+      P_hi2  = np.roll(P_reshaped,-2,axis=0)
+      P_hi3  = np.roll(P_reshaped,-3,axis=0)
+      P_hi4  = np.roll(P_reshaped,-4,axis=0)
+      dP     = (-P_hi2 + 8.*P_hi - 8.*P_low + P_low2) / 12.
+      dP_low = -(-3.*P_low4 + 16.*P_low3 - 36.*P_low2 + 48.*P_low - 25.*P_reshaped)/12.
+      dP_hi  = (-3.*P_hi4 + 16.*P_hi3 - 36.*P_hi2 + 48.*P_hi - 25.*P_reshaped)/12.
+      # correct for "edge effects"
+      dP[:5,:] = dP_hi[:5,:]
+      dP[-5:,:] = dP_low[-5:,:]  
+      ks = self.k.reshape((self.Nk,self.Nmu))[:,0]
+      dlnk = np.log(ks)[1]-np.log(ks)[0] 
+      dPdk = dP.flatten()/dlnk/self.k
+      return dPdk
+   
+   
+   def dPdmu(self,P):
+      # assumes that mu is lin spaced
+      P_reshaped = P.reshape((self.Nk,self.Nmu)) 
+      P_low  = np.roll(P_reshaped,1,axis=1)
+      P_low2 = np.roll(P_reshaped,2,axis=1)
+      P_low3 = np.roll(P_reshaped,3,axis=1) 
+      P_low4 = np.roll(P_reshaped,4,axis=1)
+      P_hi   = np.roll(P_reshaped,-1,axis=1)
+      P_hi2  = np.roll(P_reshaped,-2,axis=1)
+      P_hi3  = np.roll(P_reshaped,-3,axis=1)
+      P_hi4  = np.roll(P_reshaped,-4,axis=1)
+      dP     = (-P_hi2 + 8.*P_hi - 8.*P_low + P_low2) / 12.
+      dP_low = -(-3.*P_low4 + 16.*P_low3 - 36.*P_low2 + 48.*P_low - 25.*P_reshaped)/12.
+      dP_hi  = (-3.*P_hi4 + 16.*P_hi3 - 36.*P_hi2 + 48.*P_hi - 25.*P_reshaped)/12.
+      # correct for "edge effects"
+      dP[:,:5] = dP_hi[:,:5]
+      dP[:,-5:] = dP_low[:,-5:] 
+      dmu = self.mu[1] - self.mu[0]
+      return dP.flatten()/dmu
+    
+    
    def compute_dPdp(self, param, z, relative_step=-1., absolute_step=-1., 
                     one_sided=False, five_point=False,kwargs=None):
       '''
@@ -245,7 +308,7 @@ class fisherForecast(object):
       '''
     
       if param == 'N' : return np.ones(self.k.shape)
-      if param == 'N2': return self.k**2*self.mu**2
+      if param == 'N2' and not self.linear2: return self.k**2*self.mu**2
       if param == 'N4': return self.k**4*self.mu**4
     
       default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002}
@@ -263,12 +326,10 @@ class fisherForecast(object):
       Hz = self.Hz_fid(z)
       N_fid = 1/compute_n(self,z)
       noise = 1/compute_n(self,z)
-      if self.experiment.HI: noise = noise[0]
+      if self.experiment.HI: noise = castorinaPn(z)
       sigv = self.experiment.sigv
       N2_fid = -noise*((1+z)*sigv/Hz)**2.
-        
-      if param != 'alpha0': alpha0_fid = 0 # you'd get a k^2 dPz/dtheta term for alpha0 != 0
-            
+                    
       if kwargs is None: 
          kwargs = {'fishcast':self, 'z':z, 'b':b_fid, 'b2':8*(b_fid-1)/21,
                    'bs':-2*(b_fid-1)/7,'alpha0':alpha0_fid, 'alpha2':0,
@@ -322,30 +383,14 @@ class fisherForecast(object):
          Ohi = 4e-4*(1+z)**0.6
          Tb = 188e-3*(self.params['h'])/Ez*Ohi*(1+z)**2
          return 2. * ( P_fid - noise  + castorinaPn(z)) / Tb  
-    
-      def dPdk(): 
-         dP = P_fid - np.roll(P_fid,self.Nmu)
-         dk = self.k - np.roll(self.k,self.Nmu)
-         return dP/dk
-      
-      def dPdmu():
-          def dPdmu_fixed_k(i): 
-             dP = P_fid[self.Nmu*i:self.Nmu*(i+1)] - np.roll(P_fid[self.Nmu*i:self.Nmu*(i+1)],1)
-             dmu = self.dmu[0]
-             dPdmu = dP/dmu
-             dPdmu[0] = 0.
-             return list(dPdmu)
-          result = dPdmu_fixed_k(0)
-          for i in range(1,self.Nk): result = result + dPdmu_fixed_k(i)
-          return np.array(result)
-          
+
       if param == 'alpha_parallel':
          K,MU = self.k,self.mu
-         return -P_fid - MU*(1-MU**2)*dPdmu() - K*MU**2*dPdk()
+         return -P_fid - MU*(1-MU**2)*self.dPdmu(P_fid) - K*MU**2*self.dPdk(P_fid)
         
       if param == 'alpha_perp':
          K,MU = self.k,self.mu
-         return -2*P_fid + MU*(1-MU**2)*dPdmu() - K*(1-MU**2)*dPdk()       
+         return -2*P_fid + MU*(1-MU**2)*self.dPdmu(P_fid) - K*(1-MU**2)*self.dPdk(P_fid)       
             
       def one_sided(param,step):  
          self.cosmo.set({param:step})
@@ -380,8 +425,8 @@ class fisherForecast(object):
          dap1dp = (-3.*ap1_hi4 + 16.*ap1_hi3 - 36.*ap1_hi2 + 48.*ap1_hi - 25.*1)/(12.*step)
          result = (-3.*P_dummy_hi4 + 16.*P_dummy_hi3 - 36.*P_dummy_hi2 + 48.*P_dummy_hi - 25.*P_fid)/(12.*step)
          K,MU = self.k,self.mu
-         if self.AP: result += (dap1dp-2*dap0dp)*P_fid + MU*(1-MU**2)*(dap1dp+dap0dp)*dPdmu() +\
-                                K*(dap1dp*MU**2 - dap0dp*(1-MU**2))*dPdk()
+         if self.AP: result += (dap1dp-2*dap0dp)*P_fid + MU*(1-MU**2)*(dap1dp+dap0dp)*self.dPdmu(P_fid) +\
+                                K*(dap1dp*MU**2 - dap0dp*(1-MU**2))*self.dPdk(P_fid)
          return result
          
       # derivative of early dark energy parameters (Hill+2020)
@@ -471,8 +516,8 @@ class fisherForecast(object):
          daperpdp = (-aperp_higher + 8.*aperp_hi - 8.*aperp_low + aperp_lower) / (12. * step)
          dapardp = (-apar_higher + 8.*apar_hi - 8.*apar_low + apar_lower) / (12. * step)
          K,MU = self.k,self.mu
-         if self.AP: result += -(dapardp+2*daperpdp)*P_fid - MU*(1-MU**2)*(dapardp-daperpdp)*dPdmu() -\
-                               K*(dapardp*MU**2 + daperpdp*(1-MU**2))*dPdk()
+         if self.AP: result += -(dapardp+2*daperpdp)*P_fid - MU*(1-MU**2)*(dapardp-daperpdp)*self.dPdmu(P_fid) -\
+                               K*(dapardp*MU**2 + daperpdp*(1-MU**2))*self.dPdk(P_fid)
          if flag: result *= self.params['A_s']
          return result
 
@@ -495,8 +540,8 @@ class fisherForecast(object):
       daperpdp = (aperp_hi - aperp_low) / (2. * step)
       dapardp = (apar_hi - apar_low) / (2. * step)
       K,MU = self.k,self.mu
-      if self.AP: result += -(dapardp+2*daperpdp)*P_fid - MU*(1-MU**2)*(dapardp-daperpdp)*dPdmu() -\
-                               K*(dapardp*MU**2 + daperpdp*(1-MU**2))*dPdk()
+      if self.AP: result += -(dapardp+2*daperpdp)*P_fid - MU*(1-MU**2)*(dapardp-daperpdp)*self.dPdmu(P_fid) -\
+                               K*(dapardp*MU**2 + daperpdp*(1-MU**2))*self.dPdk(P_fid)
       if flag: result *= self.params['A_s']
       return result
 
@@ -520,7 +565,7 @@ class fisherForecast(object):
       b_fid = compute_b(self,zmid)      
       alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96) 
       noise = 1/compute_n(self,zmid)
-      if self.experiment.HI: noise = noise[0]
+      if self.experiment.HI: noise = castorinaPn(zmid)
           
       kwargs = {'fishcast':self, 'X':X, 'Y':Y, 'zmin':zmin, 'zmax':zmax,
                 'zmid':zmid,'gamma':1, 'b':b_fid, 'b2':8*(b_fid-1)/21,
@@ -566,7 +611,7 @@ class fisherForecast(object):
          upup = ','.join(list(map(str,list(default_value_float+2.*relative_step*Mnu/self.params['N_ncdm']))))
          down = ','.join(list(map(str,list(default_value_float-relative_step*Mnu/self.params['N_ncdm']))))
          downdown = ','.join(list(map(str,list(default_value_float-2.*relative_step*Mnu/self.params['N_ncdm']))))
-         step = (up-down)/2
+         step = Mnu*relative_step
       else:
          up = default_value * (1. + relative_step)
          if default_value == 0.: up = default_value + absolute_step
@@ -794,7 +839,7 @@ class fisherForecast(object):
 
    def gen_fisher(self,basis,globe,log10z_c=-1.,omega_lin=-1.,kmax_knl=1.,
                   kmin=0.003,kmax=-10.,kpar_min=-1.,derivatives=None,zbins=None,
-                  polys=True):
+                  polys=True,simpson=False):
       '''
       Computes an array of Fisher matrices, one for each redshift bin.
       '''
@@ -820,8 +865,17 @@ class fisherForecast(object):
          for i in range(n):
             for j in range(n):
                integrand = (dPdvecp[i]*Cinv*dPdvecp[j]*constraints) 
-               integrand *= self.kpar_cut[zbin_index]
-               F[i,j] = np.sum(integrand)
+               integrand *= self.kpar_cut[zbin_index] # N2 < 20 % of power
+               if simpson:
+                  
+                  ##########################################################################################
+                  # this is wrong, need to factor out dk dmu
+                    
+                  integrand_rshpd = integrand.reshape(self.Nk,self.Nmu) 
+                  partial_integrand = simps(integrand_rshpd,x=mus) # integrate over mu
+                  F[i,j] = simps(partial_integrand,x=ks) # integrate over k
+               else:
+                  F[i,j] = np.sum(integrand)
          return F
 
       fishers = [fish(zbin_index) for zbin_index in zbins]
@@ -939,7 +993,6 @@ class fisherForecast(object):
          K,MU,b = self.k,self.mu,compute_b(self,z)
          P_L = compute_matter_power_spectrum(self,z,linear=True) * (b+f*MU**2.)**2.
          P_F = compute_tracer_power_spectrum(self,z)
-         P_F += 1./compute_n(self,z)
          integrand = ( G(z)**2. * P_L / P_F )**2. 
          integrand *= self.compute_wedge(z) 
          if kpar > 0.: integrand *= (self.k*self.mu > kpar)
