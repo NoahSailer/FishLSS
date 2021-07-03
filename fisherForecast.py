@@ -19,13 +19,12 @@ class fisherForecast(object):
                 cosmo=None, 
                 cosmo_fid=None,
                 experiment=None, 
-                Nmu=10, 
-                Nk=300, 
+                Nmu=50, 
+                Nk=500, 
                 marg_params=np.array(['A_s','h']),
                 fEDE=0., 
                 log10z_c=3.56207, 
                 thetai_scf=2.83, 
-                xi_idr=0.,
                 A_lin=0., 
                 omega_lin=0.01, 
                 phi_lin=np.pi/2., 
@@ -49,7 +48,6 @@ class fisherForecast(object):
       self.log10z_c = log10z_c
       self.thetai_scf = thetai_scf
       #
-      self.xi_idr = xi_idr
       # parameters for primordial wiggles
       self.A_lin = A_lin 
       self.omega_lin = omega_lin
@@ -109,7 +107,6 @@ class fisherForecast(object):
          self.thetai_scf = params['thetai_scf']
       k = np.logspace(np.log10(self.kmin),np.log10(self.kmax),self.Nk)
       dk = list(k[1:]-k[:-1])
-      #dk.append(dk[-1])
       dk.insert(0,dk[0])
       dk = np.array(dk)
       mu = np.linspace(0.,1.,self.Nmu)
@@ -139,7 +136,6 @@ class fisherForecast(object):
       self.Ckk_fid = np.zeros(len(self.ell))
       self.Ckg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
       self.Cgg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
-      self.Ngg = np.zeros((self.experiment.nbins,len(self.ell)))
         
       try: 
         Ckk = np.genfromtxt('output/'+self.name+'/derivatives_Cl/Ckk_fid.txt')
@@ -175,22 +171,16 @@ class fisherForecast(object):
             if len(Ckg) != len(self.ell): raise Exception('')
             filename = 'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
             Cgg = np.genfromtxt(filename)
-            filename = 'output/'+self.name+'/derivatives_Cl/Ngg_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
-            Ngg = np.genfromtxt(filename)
             self.Ckg_fid[i] = Ckg
             self.Cgg_fid[i] = Cgg
-            self.Ngg[i] = Ngg
             
          except:
             self.Ckg_fid[i] = compute_lensing_Cell(self,'k','g',zmin,zmax)
             self.Cgg_fid[i] = compute_lensing_Cell(self,'g','g',zmin,zmax)
-            self.Ngg[i] = compute_lensing_Cell(self,'g','g',zmin,zmax,noise=True)
             filename = 'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
             np.savetxt(filename,self.Ckg_fid[i])
             filename = 'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
             np.savetxt(filename,self.Cgg_fid[i])
-            filename = 'output/'+self.name+'/derivatives_Cl/Ngg_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
-            np.savetxt(filename,self.Ngg[i])
             
       self.kpar_cut = np.ones((self.experiment.nbins,self.Nk*self.Nmu))
       for i in range(self.experiment.nbins): 
