@@ -47,7 +47,7 @@ def Romanb(z): return 1.1*z+0.3
 
 def ELGb(fishcast,z):
    D = fishcast.cosmo_fid.scale_independent_growth_factor(z)
-   return 0.84/D
+   return 0.84/(1+z)#0.84/D
 
 def MSEb(fishcast,z):
    '''

@@ -36,7 +36,8 @@ class fisherForecast(object):
                 AP=True,
                 recon=False,
                 ell=np.arange(10,1000,1),
-                N2cut=0.2):
+                N2cut=0.2,
+                setup=True):
         
       self.kmin = kmin
       self.kmax = kmax
@@ -84,8 +85,10 @@ class fisherForecast(object):
          print('Attempted to create a forecast without an experiment or cosmology.')     
       else:
          self.set_experiment_and_cosmology_specific_parameters(experiment, cosmo, cosmo_fid)
-           
-        
+      
+      if setup: self.compute_fiducial_Pk_Cl()
+      
+
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, cosmo_fid):
       self.experiment = experiment
       self.cosmo = cosmo
@@ -122,14 +125,16 @@ class fisherForecast(object):
                                for i in range(len(experiment.zedges)-1)])
        
       redshifts = np.linspace(0,7,1000)
-      Da_fid = np.array([self.cosmo.angular_distance(z) for z in redshifts])*self.params['h']
-      Hz_fid = np.array([self.cosmo.Hubble(z)*(299792.458)/self.params['h'] for z in redshifts])
-      rsd_fid = np.array([self.cosmo.get_current_derived_parameters(['rs_d'])['rs_d']*self.params['h'] for z in redshifts])
+      Da_fid = np.array([self.cosmo_fid.angular_distance(z) for z in redshifts])*self.params['h']
+      Hz_fid = np.array([self.cosmo_fid.Hubble(z)*(299792.458)/self.params['h'] for z in redshifts])
+      rsd_fid = np.array([self.cosmo_fid.get_current_derived_parameters(['rs_d'])['rs_d']*self.params['h'] for z in redshifts])
       self.Da_fid = interp1d(redshifts,Da_fid,kind='linear')
       self.Hz_fid = interp1d(redshifts,Hz_fid,kind='linear')
       self.rsd_fid = interp1d(redshifts,rsd_fid,kind='linear')
       
-    
+
+   def compute_fiducial_Pk_Cl(self):
+
       # Calculate the fiducial power spectra in each redshift bin, and save them
       self.P_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
       self.P_recon_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
