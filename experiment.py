@@ -28,7 +28,8 @@ class experiment(object):
                 Ndetectors=256**2.,     # HI survey: number of detectors
                 fill_factor=0.5,        # HI survey: the array's fill factor 
                 tint=5,                 # HI survey: oberving time [years]
-                sigv=100):              # comoving velocity dispersion for FoG contribution [km/s]
+                sigv=100,               # comoving velocity dispersion for FoG contribution [km/s]
+                HI_ideal=False):              
 
       self.zmin = zmin
       self.zmax = zmax

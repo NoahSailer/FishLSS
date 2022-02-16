@@ -209,7 +209,7 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    stoch  = [0,N2,N4]
    pars   = biases + cterms + stoch
 
-   lpt = LPT_RSD(klin,plin,kIR=kIR,one_loop=one_loop)
+   lpt = LPT_RSD(klin,plin,kIR=kIR,one_loop=one_loop,cutoff=2)
    lpt.make_pltable(f,kmin=min(klin),kmax=max(klin),nk=len(klin))
    k,p0,p2,p4 = lpt.combine_bias_terms_pkell(pars)
    if moments: return k,p0,p2,p4
@@ -249,13 +249,13 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
     
    if X == Y and X == 'k': 
       plin = np.array([fishcast.cosmo.pk_lin(k*h,z)*h**3. for k in klin])
-      cleft = CLEFT(klin,plin)
+      cleft = CLEFT(klin,plin,cutoff=2.)
       cleft.make_ptable(kmin=min(klin),kmax=max(klin),nk=fishcast.Nk)
       kk,pmm = cleft.combine_bias_terms_pk(0,0,0,0,0,0) 
       if z>10: pmm=np.array([fishcast.cosmo.pk(k*h,z)*h**3. for k in klin])
       return interp1d(kk, pmm, kind='linear', bounds_error=False, fill_value=0.)
     
-   cleft = CLEFT(klin,plin)
+   cleft = CLEFT(klin,plin,cutoff=2.)
    cleft.make_ptable(kmin=min(klin),kmax=max(klin),nk=fishcast.Nk)
    
    bL1 = b-1.
