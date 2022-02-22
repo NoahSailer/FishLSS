@@ -720,13 +720,17 @@ class fisherForecast(object):
       zs = self.experiment.zcenters
       for z in zs:
          for marg_param in self.marg_params:
-            dPdp = self.compute_dPdp(param=marg_param, z=z, five_point=five_point)
             if marg_param == 'fEDE': filename = 'fEDE_'+str(int(1000.*self.log10z_c))+'_'+str(int(100*z))+'.txt'
             elif marg_param == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z))+'.txt'
             else: filename = marg_param+'_'+str(int(100*z))+'.txt'
             folder = '/derivatives/'
             if self.recon: folder = '/derivatives_recon/'
-            np.savetxt('output/'+self.name+folder+filename,dPdp)
+            fname = 'output/'+self.name+folder+filename
+            if not exists(fname) or overwrite:
+               dPdp = self.compute_dPdp(param=marg_param, z=z, five_point=five_point)
+               np.savetxt(,dPdp)
+            else:
+               continue
        
     
    def compute_Cl_derivatives(self, overwrite=False):
