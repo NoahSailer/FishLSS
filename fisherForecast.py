@@ -5,6 +5,7 @@ from castorina import castorinaBias,castorinaPn
 from multiprocessing import Pool
 from functools import partial
 import os
+from os.path import exists
 
 
 class fisherForecast(object):
@@ -37,7 +38,8 @@ class fisherForecast(object):
                 recon=False,
                 ell=np.arange(10,1000,1),
                 N2cut=0.2,
-                setup=True):
+                setup=True,
+                overwrite=False):
         
       self.kmin = kmin
       self.kmax = kmax
@@ -86,7 +88,7 @@ class fisherForecast(object):
       else:
          self.set_experiment_and_cosmology_specific_parameters(experiment, cosmo, cosmo_fid)
       
-      if setup: self.compute_fiducial_Pk_Cl()
+      if setup or overwrite: self.compute_fiducial_Pk_Cl(overwrite=overwrite)
       
 
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, cosmo_fid):
@@ -133,60 +135,63 @@ class fisherForecast(object):
       self.rsd_fid = interp1d(redshifts,rsd_fid,kind='linear')
       
 
-   def compute_fiducial_Pk_Cl(self):
+   def compute_fiducial_Pk_Cl(self, overwrite=False):
 
-      # Calculate the fiducial power spectra in each redshift bin, and save them
       self.P_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
       self.P_recon_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
       self.Ckk_fid = np.zeros(len(self.ell))
       self.Ckg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
       self.Cgg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
         
-      try: 
-        Ckk = np.genfromtxt('output/'+self.name+'/derivatives_Cl/Ckk_fid.txt')
-        if len(Ckk) != len(self.ell): raise Exception('')
-        self.Ckk_fid = Ckk
-      except: 
-        zs = self.experiment.zedges
-        self.Ckk_fid = compute_lensing_Cell(self,'k','k')
-        np.savetxt('output/'+self.name+'/derivatives_Cl/Ckk_fid.txt',self.Ckk_fid)
-        
+      # Ckk    
+      fname = 'output/'+self.name+'/derivatives_Cl/Ckk_fid.txt'
+      if not exists(fname) or overwrite:  
+         self.Ckk_fid = compute_lensing_Cell(self,'k','k')
+         np.savetxt(fname,self.Ckk_fid)
+      else:
+         self.Ckk_fid = np.genfromtxt(fname)
+         
+      # Compute fiducial power spectra in each redshift bin
       for i in range(self.experiment.nbins):
          z = self.experiment.zcenters[i]
          zmin = self.experiment.zedges[i]
          zmax = self.experiment.zedges[i+1]
-         try: 
-            p = np.genfromtxt('output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt')
-            if len(p) != self.Nk*self.Nmu: raise Exception('')
-            self.P_fid[i] = p
-            p = np.genfromtxt('output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt')
-            if len(p) != self.Nk*self.Nmu: raise Exception('')
-            self.P_recon_fid[i] = p
-         except:
+         
+         # P(k)
+         fname = 'output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt'
+         if not exists(fname) or overwrite:  
             self.P_fid[i] = compute_tracer_power_spectrum(self,z)
-            np.savetxt('output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt',self.P_fid[i])
+            np.savetxt(fname,self.P_fid[i])
+         else:
+            self.P_fid[i] = np.genfromtxt(fname)
+
+         # P_recon(k)
+         fname = 'output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt'
+         if not exists(fname) or overwrite:  
             self.recon = True
             self.P_recon_fid[i] = compute_tracer_power_spectrum(self,z)
-            np.savetxt('output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt',self.P_recon_fid[i])
             self.recon = False
+            np.savetxt(fname,self.P_recon_fid[i])
+         else:
+            self.P_recon_fid[i] = np.genfromtxt(fname)
             
-         try:
-            filename = 'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
-            Ckg = np.genfromtxt(filename)
-            if len(Ckg) != len(self.ell): raise Exception('')
-            filename = 'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
-            Cgg = np.genfromtxt(filename)
-            self.Ckg_fid[i] = Ckg
-            self.Cgg_fid[i] = Cgg
-            
-         except:
+         # Ckg
+         fname = 'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
+         if not exists(fname) or overwrite:
             self.Ckg_fid[i] = compute_lensing_Cell(self,'k','g',zmin,zmax)
+            np.savetxt(fname,self.Ckg_fid[i])
+         else: 
+            self.Ckg_fid[i] = np.genfromtxt(fname)
+         
+         # Cgg
+         fname = 'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
+         if not exists(fname) or overwrite:
             self.Cgg_fid[i] = compute_lensing_Cell(self,'g','g',zmin,zmax)
-            filename = 'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
-            np.savetxt(filename,self.Ckg_fid[i])
-            filename = 'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
-            np.savetxt(filename,self.Cgg_fid[i])
-            
+            np.savetxt(fname,self.Cgg_fid[i])
+         else:
+            self.Cgg_fid[i] = np.genfromtxt(fname)
+          
+      # setup the k_par cut  
       self.kpar_cut = np.ones((self.experiment.nbins,self.Nk*self.Nmu))
       for i in range(self.experiment.nbins): 
          z = self.experiment.zcenters[i]
@@ -194,8 +199,8 @@ class fisherForecast(object):
   
 
    def compute_kpar_cut(self,z,zindex=None):
-      # Create a "k_parallel cut", removing modes whose sn2 term
-      # is >= 20% of the total power
+      # Create a "k_parallel cut", removing modes whose N2 term
+      # is >= 100*N2cut % of the total power
       def get_n(z):
          if self.experiment.HI: return castorinaPn(z)
          return compute_n(self,z)
@@ -211,13 +216,15 @@ class fisherForecast(object):
         
    def comov_vol(self,zmin,zmax):
       '''
-      Returns the comoving volume in Mpc^3/h^3 between 
-      zmin and zmax assuming that the universe is flat.
+      Returns the comoving volume in (Mpc/h)^3 between 
+      zmin and zmax, assuming that the universe is flat.
       Includes the fsky of the experiment.
       '''
-      vsmall = (4*np.pi/3) * ((1.+zmin)*self.cosmo.angular_distance(zmin))**3.
-      vbig = (4*np.pi/3) * ((1.+zmax)*self.cosmo.angular_distance(zmax))**3.
-      return self.experiment.fsky*(vbig - vsmall)*self.params['h']**3.
+      chi = lambda z: (1+z)*self.cosmo.angular_distance(z)
+      h = self.params_fid['h']
+      vsmall = (4*np.pi/3) * chi(zmin)**3.
+      vbig = (4*np.pi/3) * chi(zmax)**3.
+      return self.experiment.fsky*(vbig - vsmall)*h**3.
 
 
    def LegendreTrans(self,l,p):
@@ -671,20 +678,24 @@ class fisherForecast(object):
       return wedge*kparallel_constraint
     
     
-   def compute_derivatives(self, five_point=True, parameters=None, z=None):
+   def compute_derivatives(self, five_point=True, parameters=None, z=None, overwrite=False):
       '''
       Calculates all the derivatives and saves them to the 
       output/forecast name/derivatives directory
       '''
       if parameters is not None: 
          for i,p in enumerate(parameters):
-            dPdp = self.compute_dPdp(param=p, z=z[i], five_point=five_point)
             if p == 'fEDE': filename = 'fEDE_'+str(int(1000.*self.log10z_c))+'_'+str(int(100*z[i]))+'.txt'
             elif p == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z[i]))+'.txt'
             else: filename = p+'_'+str(int(100*z[i]))+'.txt'
             folder = '/derivatives/'
             if self.recon: folder = '/derivatives_recon/'
-            np.savetxt('output/'+self.name+folder+filename,dPdp)
+            fname = 'output/'+self.name+folder+filename
+            if not exists(fname) or overwrite: 
+               dPdp = self.compute_dPdp(param=p, z=z[i], five_point=five_point)
+               np.savetxt(fname,dPdp)
+            else:
+               continue
          return
       zs = self.experiment.zcenters
       for z in zs:
@@ -698,7 +709,7 @@ class fisherForecast(object):
             np.savetxt('output/'+self.name+folder+filename,dPdp)
        
     
-   def compute_Cl_derivatives(self):
+   def compute_Cl_derivatives(self, overwrite=False):
       '''
       Calculates the derivatives of Ckk, Ckg, and Cgg with respect to 
       each of the marg_params. 
@@ -707,23 +718,39 @@ class fisherForecast(object):
       for marg_param in self.marg_params:
          #
          if marg_param != 'gamma':
-            dCdp = self.compute_dCdp(marg_param, 'k', 'k')
             filename = 'Ckk_'+marg_param+'.txt'
-            np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)
+            fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+            if not exists(fname) or overwrite: 
+               dCdp = self.compute_dCdp(marg_param, 'k', 'k')
+               np.savetxt(fname,dCdp)
+            else:
+               continue
          else:
             for i,z in enumerate(zs[:-1]):
-               dCdp = self.compute_dCdp(marg_param, 'k', 'k',zmin=zs[i],zmax=zs[i+1])
                filename = 'Ckk_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
-               np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)
+               fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+               if not exists(fname) or overwrite: 
+                  dCdp = self.compute_dCdp(marg_param, 'k', 'k',zmin=zs[i],zmax=zs[i+1])
+                  np.savetxt(fname,dCdp)
+               else:
+                  continue
          #
          for i,z in enumerate(zs[:-1]):
-            dCdp = self.compute_dCdp(marg_param, 'g', 'g', zmin=zs[i], zmax=zs[i+1])
             filename = 'Cgg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
-            np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)   
-            #
-            dCdp = self.compute_dCdp(marg_param, 'k', 'g', zmin=zs[i], zmax=zs[i+1])
+            fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+            if not exists(fname) or overwrite: 
+               dCdp = self.compute_dCdp(marg_param, 'g', 'g', zmin=zs[i], zmax=zs[i+1])
+               np.savetxt(fname,dCdp) 
+            else:
+               continue
+            
             filename = 'Ckg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
-            np.savetxt('output/'+self.name+'/derivatives_Cl/'+filename,dCdp)
+            fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+            if not exists(fname) or overwrite: 
+               dCdp = self.compute_dCdp(marg_param, 'k', 'g', zmin=zs[i], zmax=zs[i+1])
+               np.savetxt(fname,dCdp)
+            else:
+               continue
             
             
    def check_derivatives(self):
@@ -975,7 +1002,7 @@ class fisherForecast(object):
       return f
     
     
-   def Nmodes(self,zmin,zmax,nbins,kpar=-1.):
+   def Nmodes(self,zmin,zmax,nbins,kpar=-1.,kmax=-1,alpha0=-1,alpha2=0,linear=False):
     
       def G(z):
          Sigma2 = self.Sigma2(z)
@@ -987,11 +1014,14 @@ class fisherForecast(object):
          f = self.cosmo.scale_independent_growth_factor_f(z)      
          K,MU,b = self.k,self.mu,compute_b(self,z)
          P_L = compute_matter_power_spectrum(self,z,linear=True) * (b+f*MU**2.)**2.
-         P_F = compute_tracer_power_spectrum(self,z)
-         integrand = ( G(z)**2. * P_L / P_F )**2. 
+         P_F = compute_tracer_power_spectrum(self,z,alpha0=alpha0,alpha2=alpha2)
+         if linear: P_F = P_L + 1/compute_n(self,z)
+         integrand = ( G(z)**2 * P_L / P_F )**2. 
          integrand *= self.compute_wedge(z) 
          if kpar > 0.: integrand *= (self.k*self.mu > kpar)
+         if kmax > 0.: integrand *= (self.k < kmax)
          return sum(integrand * self.k**2. * self.dk * self.dmu / (2. * np.pi**2.))
+         # we are dividing by 2 pi^2 (and not 4 pi^2) since we integrate from mu = 0 to 1
     
       zedges = np.linspace(zmin,zmax,nbins+1)
       zs = (zedges[1:]+zedges[:-1])/2.
@@ -1015,6 +1045,7 @@ class fisherForecast(object):
          P_F = compute_tracer_power_spectrum(self,z)
          integrand = ( G(z)**2. * P_L / P_F )**2. 
          integrand *= self.k**2. * Deltak * self.dmu / (2. * np.pi**2.)
+         # we are dividing by 2 pi^2 (and not 4 pi^2) since we integrate from mu = 0 to 1
          ks = self.k.reshape((self.Nk,self.Nmu))[:,0]
          integrand = integrand.reshape((self.Nk,self.Nmu))
          integrand = np.sum(integrand, axis=1)
