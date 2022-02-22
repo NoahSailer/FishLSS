@@ -401,7 +401,7 @@ def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
     
    zelda = Zeldovich_Recon(klin,plin,R=15)
 
-   kSparse,p0ktable,p2ktable,p4ktable = zelda.make_pltable(f,ngauss=3,kmin=min(K),kmax=max(K),nk=500,method='RecSym')
+   kSparse,p0ktable,p2ktable,p4ktable = zelda.make_pltable(f,ngauss=3,kmin=min(K),kmax=max(K),nk=200,method='RecSym')
    bias_factors = np.array([1, bL1, bL1**2, bL2, bL1*bL2, bL2**2, bLs, bL1*bLs, bL2*bLs, bLs**2,0,0,0])
    p0Sparse = np.sum(p0ktable*bias_factors, axis=1)
    p2Sparse = np.sum(p2ktable*bias_factors, axis=1)
