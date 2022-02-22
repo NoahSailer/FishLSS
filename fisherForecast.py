@@ -728,7 +728,7 @@ class fisherForecast(object):
             fname = 'output/'+self.name+folder+filename
             if not exists(fname) or overwrite:
                dPdp = self.compute_dPdp(param=marg_param, z=z, five_point=five_point)
-               np.savetxt(,dPdp)
+               np.savetxt(fname,dPdp)
             else:
                continue
        
