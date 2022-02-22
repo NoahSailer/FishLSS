@@ -4,7 +4,7 @@ from twoPointNoise import *
 from castorina import castorinaBias,castorinaPn
 from multiprocessing import Pool
 from functools import partial
-import os
+import os, json
 from os.path import exists
 
 
@@ -89,6 +89,8 @@ class fisherForecast(object):
          self.set_experiment_and_cosmology_specific_parameters(experiment, cosmo, cosmo_fid)
       
       if setup or overwrite: self.compute_fiducial_Pk_Cl(overwrite=overwrite)
+      
+      self.create_json_summary()
       
 
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, cosmo_fid):
@@ -196,6 +198,24 @@ class fisherForecast(object):
       for i in range(self.experiment.nbins): 
          z = self.experiment.zcenters[i]
          self.kpar_cut[i] = self.compute_kpar_cut(z,i)
+         
+         
+   def create_json_summary(self):
+      # 
+      ze = list(self.experiment.zedges)
+      zs = self.experiment.zcenters
+      bs = list([float(compute_b(self,z)) for z in zs])
+      ns = list([float(compute_n(self,z)) for z in zs])
+      
+      data = {'Forecast name': self.name,
+              'Edges of redshift bins': ze,
+              'Linear Eulerian bias in each bin': bs,
+              'Number density in each bin': ns,
+              'fsky': self.experiment.fsky,
+              'CLASS default parameters': self.params_fid}
+
+      with open('output/'+self.name+'/'+'summary.json', 'w') as write_file:
+         json.dump(data, write_file)
   
 
    def compute_kpar_cut(self,z,zindex=None):
