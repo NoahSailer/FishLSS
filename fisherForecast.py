@@ -209,7 +209,7 @@ class fisherForecast(object):
       
       data = {'Forecast name': self.name,
               'Edges of redshift bins': ze,
-              'Centers of redshift bins': zs,
+              'Centers of redshift bins': list(zs),
               'Linear Eulerian bias in each bin': bs,
               'Number density in each bin': ns,
               'fsky': self.experiment.fsky,
