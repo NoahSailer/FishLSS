@@ -215,7 +215,7 @@ class fisherForecast(object):
               'CLASS default parameters': self.params_fid}
 
       with open('output/'+self.name+'/'+'summary.json', 'w') as write_file:
-         json.dump(data, write_file)
+         json.dump(data, write_file, indent=2)
   
 
    def compute_kpar_cut(self,z,zindex=None):
