@@ -94,7 +94,7 @@ def do_task(sfb,task,fsky):
        basis = np.array(['alpha_perp','alpha_parallel','b'])
        forecast.recon = True
        forecast.marg_params = basis
-       forecast.compute_derivatives()
+       forecast.compute_derivatives(five_point=False)
        forecast.recon = False
        #
     elif task == 'fs':
@@ -108,7 +108,7 @@ def do_task(sfb,task,fsky):
        forecast = forecast = make_forecast(cosmo,sfb,task,fsky)
        basis = np.array(['log(A_s)','N','alpha0','b','b2','bs','N2','N4','alpha2','alpha4'])
        forecast.marg_params = basis
-       forecast.compute_derivatives()
+       forecast.compute_derivatives(five_point=False)
        # 
     elif task == 'lens':
        params = {'output': 'tCl lCl mPk',\
@@ -124,7 +124,7 @@ def do_task(sfb,task,fsky):
        forecast = forecast = make_forecast(cosmo,sfb,task,fsky)
        basis = np.array(['log(A_s)','N','alpha0','b','b2','bs','alphax'])
        forecast.marg_params = basis
-       forecast.compute_Cl_derivatives()
+       forecast.compute_Cl_derivatives(five_point=False)
     else:
         raise RuntimeError("Unknown task "+str(task))
     #

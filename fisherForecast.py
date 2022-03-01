@@ -368,25 +368,28 @@ class fisherForecast(object):
             param = 'b' ; fNL_flag = True
          if param == 'f': default_value = f_fid
          else: default_value = kwargs[param]
+         #
          up = default_value*(1+relative_step)
          if default_value == 0: up = absolute_step
-         upup = default_value*(1+2*relative_step)
-         if default_value == 0: upup = 2*absolute_step
          down = default_value*(1-relative_step)
          if default_value == 0: down = -absolute_step
+         upup = default_value*(1+2*relative_step)
+         if default_value == 0: upup = 2*absolute_step
          downdown = default_value*(1-2*relative_step)
          if default_value == 0: downdown = -2*absolute_step
          step = up - default_value
          kwargs[param] = up
          P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
-         kwargs[param] = upup
-         P_dummy_higher = compute_tracer_power_spectrum(**kwargs)
          kwargs[param] = down
          P_dummy_low = compute_tracer_power_spectrum(**kwargs)
-         kwargs[param] = downdown
-         P_dummy_lower = compute_tracer_power_spectrum(**kwargs)
+         if five_point:
+            kwargs[param] = upup
+            P_dummy_higher = compute_tracer_power_spectrum(**kwargs)
+            kwargs[param] = downdown
+            P_dummy_lower = compute_tracer_power_spectrum(**kwargs)
          kwargs[param] = default_value
-         dPdtheta = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
+         if five_point: dPdtheta = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
+         else: dPdtheta = (P_dummy_hi - P_dummy_low) / (2. * step)
          if fNL_flag:
             D = 0.76 * self.cosmo.scale_independent_growth_factor(z) # normalized so D(a) = a in the MD era
             # brute force way of getting the transfer function, normalized to 1 at kmin
@@ -570,7 +573,7 @@ class fisherForecast(object):
 
 
    def compute_dCdp(self, param, X, Y, zmin=None, zmax=None, 
-                    relative_step=-1., absolute_step=-1.):
+                    relative_step=-1., absolute_step=-1., five_point=False):
       '''
       '''
       default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002}
@@ -598,23 +601,25 @@ class fisherForecast(object):
          default_value = kwargs[param]
          up = default_value*(1+relative_step)
          if default_value == 0: up = absolute_step
-         upup = default_value*(1+2*relative_step)
-         if default_value == 0: upup = 2*absolute_step
          down = default_value*(1-relative_step)
          if default_value == 0: down = -absolute_step
+         upup = default_value*(1+2*relative_step)
+         if default_value == 0: upup = 2*absolute_step
          downdown = default_value*(1-2*relative_step)
          if default_value == 0: downdown = -2*absolute_step
          step = up - default_value
          kwargs[param] = up
          P_dummy_hi = compute_lensing_Cell(**kwargs)
-         kwargs[param] = upup
-         P_dummy_higher = compute_lensing_Cell(**kwargs)
          kwargs[param] = down
          P_dummy_low = compute_lensing_Cell(**kwargs)
-         kwargs[param] = downdown
-         P_dummy_lower = compute_lensing_Cell(**kwargs)
+         if five_point:
+            kwargs[param] = upup
+            P_dummy_higher = compute_lensing_Cell(**kwargs)
+            kwargs[param] = downdown
+            P_dummy_lower = compute_lensing_Cell(**kwargs)
          kwargs[param] = default_value
-         return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. *  step) 
+         if five_point: return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. *  step) 
+         return (P_dummy_hi-P_dummy_low) / (2. * step)
     
       P_fid = compute_lensing_Cell(**kwargs)
               
@@ -655,18 +660,20 @@ class fisherForecast(object):
       set_param(up)
       self.cosmo.compute()
       P_dummy_hi = compute_lensing_Cell(**kwargs)
-      set_param(upup)
-      self.cosmo.compute()
-      P_dummy_higher = compute_lensing_Cell(**kwargs)
       set_param(down)
       self.cosmo.compute()
       P_dummy_low = compute_lensing_Cell(**kwargs)
-      set_param(downdown)
-      self.cosmo.compute()
-      P_dummy_lower = compute_lensing_Cell(**kwargs)
+      if five_point:
+         set_param(upup)
+         self.cosmo.compute()
+         P_dummy_higher = compute_lensing_Cell(**kwargs)
+         set_param(downdown)
+         self.cosmo.compute()
+         P_dummy_lower = compute_lensing_Cell(**kwargs)
       set_param(default_value)
       self.cosmo.compute()
-      result = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
+      if five_point: result = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
+      else: result = (P_dummy_hi-P_dummy_low)/(2.*step)
       if flag: result *= self.params['A_s']
       return result
 
@@ -734,7 +741,7 @@ class fisherForecast(object):
                continue
        
     
-   def compute_Cl_derivatives(self, overwrite=False):
+   def compute_Cl_derivatives(self, five_point=True, overwrite=False):
       '''
       Calculates the derivatives of Ckk, Ckg, and Cgg with respect to 
       each of the marg_params. 
@@ -746,7 +753,7 @@ class fisherForecast(object):
             filename = 'Ckk_'+marg_param+'.txt'
             fname = 'output/'+self.name+'/derivatives_Cl/'+filename
             if not exists(fname) or overwrite: 
-               dCdp = self.compute_dCdp(marg_param, 'k', 'k')
+               dCdp = self.compute_dCdp(marg_param, 'k', 'k', five_point=five_point)
                np.savetxt(fname,dCdp)
             else:
                continue
@@ -755,7 +762,7 @@ class fisherForecast(object):
                filename = 'Ckk_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
                fname = 'output/'+self.name+'/derivatives_Cl/'+filename
                if not exists(fname) or overwrite: 
-                  dCdp = self.compute_dCdp(marg_param, 'k', 'k',zmin=zs[i],zmax=zs[i+1])
+                  dCdp = self.compute_dCdp(marg_param, 'k', 'k',zmin=zs[i],zmax=zs[i+1], five_point=five_point)
                   np.savetxt(fname,dCdp)
                else:
                   continue
@@ -764,7 +771,7 @@ class fisherForecast(object):
             filename = 'Cgg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
             fname = 'output/'+self.name+'/derivatives_Cl/'+filename
             if not exists(fname) or overwrite: 
-               dCdp = self.compute_dCdp(marg_param, 'g', 'g', zmin=zs[i], zmax=zs[i+1])
+               dCdp = self.compute_dCdp(marg_param, 'g', 'g', zmin=zs[i], zmax=zs[i+1], five_point=five_point)
                np.savetxt(fname,dCdp) 
             else:
                continue
@@ -772,7 +779,7 @@ class fisherForecast(object):
             filename = 'Ckg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
             fname = 'output/'+self.name+'/derivatives_Cl/'+filename
             if not exists(fname) or overwrite: 
-               dCdp = self.compute_dCdp(marg_param, 'k', 'g', zmin=zs[i], zmax=zs[i+1])
+               dCdp = self.compute_dCdp(marg_param, 'k', 'g', zmin=zs[i], zmax=zs[i+1], five_point=five_point)
                np.savetxt(fname,dCdp)
             else:
                continue
