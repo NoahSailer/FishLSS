@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 #
-# Script to generate inputs needed for Fisher forecasts of
-# BAO and RSD performance of specified surveys.
-# This is the "driver" used by the "BAO_sigma8" Jupyter
-# notebook.
+# Script to generate inputs for a survey, using 
+# redshift bins of width \Delta z = 0.2.
 #
 import sys
 from math import ceil

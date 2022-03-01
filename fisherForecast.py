@@ -88,9 +88,9 @@ class fisherForecast(object):
       else:
          self.set_experiment_and_cosmology_specific_parameters(experiment, cosmo, cosmo_fid)
       
-      if setup or overwrite: self.compute_fiducial_Pk_Cl(overwrite=overwrite)
+      if setup: self.create_json_summary()
       
-      self.create_json_summary()
+      if setup or overwrite: self.compute_fiducial_Pk_Cl(overwrite=overwrite)
       
 
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, cosmo_fid):
