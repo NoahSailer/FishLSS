@@ -139,7 +139,7 @@ if __name__=="__main__":
     elif len(sys.argv)==4:
         fsky = float(sys.argv[3])
     else:
-        outstr = "Usage: "+sys.argv[0]+" <survey-filename> <task-name> [fsky=0.5]"
+        outstr = "Usage: "+sys.argv[0]+" <survey-filename> <task-name> [fsky=0.34]"
         raise RuntimeError(outstr)
     # Extract the arguments.
     filebase = sys.argv[1]
