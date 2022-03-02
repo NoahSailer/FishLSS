@@ -32,7 +32,7 @@ def compute_covariance_matrix(fishcast, zbin_index, nratio=1):
    # this assumes that the fiducial exeriment doesn't have any redshift errors, come up with a more general fix
    P_fid = fishcast.P_fid[zbin_index]
    if fishcast.recon: P_fid = fishcast.P_recon_fid[zbin_index]
-   C = prefactor * (P_fid-1/compute_n(fishcast, z)+nratio/number_density)**2.
+   C = prefactor * (P_fid-1/compute_n(fishcast, z)+1/nratio/number_density)**2.
    return np.maximum(C,1e-50) # avoiding numerical nonsense with possible 0's
 
 

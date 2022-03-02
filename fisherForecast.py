@@ -893,7 +893,7 @@ class fisherForecast(object):
 
    def gen_fisher(self,basis,globe,log10z_c=-1.,omega_lin=-1.,kmax_knl=1.,
                   kmin=0.003,kmax=-10.,kpar_min=-1.,derivatives=None,zbins=None,
-                  polys=True,simpson=False):
+                  polys=True,simpson=False,nratio=1.):
       '''
       Computes an array of Fisher matrices, one for each redshift bin.
       '''
@@ -910,7 +910,7 @@ class fisherForecast(object):
          F = np.zeros((n,n))
          z = self.experiment.zcenters[zbin_index]
          dPdvecp = derivatives[zbin_index]
-         Cinv = 1./self.get_covariance_matrix(zbin_index)
+         Cinv = 1./compute_covariance_matrix(self,zbin_index,nratio=nratio)
          mus = self.mu.reshape(self.Nk,self.Nmu)[0] 
          ks = self.k.reshape(self.Nk,self.Nmu)[:,0] 
          constraints = self.compute_wedge(z,kmin=kmin)*self.kmax_constraint(z,kmax_knl)
@@ -1016,9 +1016,6 @@ class fisherForecast(object):
                   A = np.dot(Cinv,derivs[j][idx_bins,i])
                   result[j,k] += np.dot(derivs[k][idx_bins,i],A)
       return result
-
-
-   def get_covariance_matrix(self, zbin_index): return compute_covariance_matrix(self,zbin_index)
 
         
    def get_f_at_fixed_mu(self,f,mu):
