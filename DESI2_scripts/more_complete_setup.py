@@ -42,9 +42,10 @@ def make_forecast(cosmo,sfb,task,fsky):
     #
     # Assume zs spans the full survey, but round the
     # bin edges to 0.1.
-    zmin = 0.1*int(ceil(zs[0]*10))
-    zmax = 0.1*int(zs[-1]*10)
-    zedg = np.arange(zmin,zmax+0.2,0.2)
+    zmin = round(0.1*int(ceil(zs[0]*10)),4)
+    zmax = round(0.1*int(zs[-1]*10),4)
+    N = round((zmax-zmin)/0.2)+1
+    zedg = np.linspace(zmin,zmax,N,endpoint=True)
     #
     # Interpolate the bias and number density
     b = interp1d(zs,bs)
