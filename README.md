@@ -3,7 +3,7 @@
 # FishLSS
 
 ![Fishing astro](https://github.com/NoahSailer/FishLSS/blob/master/figures/fishing_astro.jpg)
-<sub>Adapted from https://www.vectorstock.com/royalty-free-vectors/astronaut-with-a-fishing-vectors using state-of-the miscrosoft paint<sub>
+
 
 Forecasting code for LSS surveys. Requires numpy, scipy, [pyFFTW](https://hgomersall.github.io/pyFFTW/), and [CLASS_EDE](https://github.com/mwt5345/class_ede): an 
 extension of the Boltzmann code [CLASS](https://github.com/lesgourg/class_public) that includes an Early Dark Energy model.
