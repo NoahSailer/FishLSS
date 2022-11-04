@@ -15,6 +15,7 @@ class experiment(object):
                 n=1e-3,                 # Galaxy number density, float (constant n) or function of z
                 b=1.5,                  # Galaxy bias, float (constant b) or function of z
                 b2=None,                #
+                alpha0=None,            #
                 LBG=False,              # 
                 HI=False,               # 
                 Halpha=False,           # 
@@ -29,6 +30,7 @@ class experiment(object):
                 fill_factor=0.5,        # HI survey: the array's fill factor 
                 tint=5,                 # HI survey: oberving time [years]
                 sigv=100,               # comoving velocity dispersion for FoG contribution [km/s]
+                D = 6,
                 HI_ideal=False):              
 
       self.zmin = zmin
@@ -48,6 +50,7 @@ class experiment(object):
       if not isinstance(b, float): self.b = b
       else: self.b = lambda z: b + 0.*z
       self.b2 = b2
+      self.alpha0 = alpha0
       self.LBG = LBG
       self.HI = HI
       self.Halpha = Halpha
@@ -61,6 +64,7 @@ class experiment(object):
       self.fill_factor = fill_factor
       self.tint = tint
       self.sigv = sigv
+      self.D = D  
       if pesimistic: 
          self.N_w = 3.
          self.kparallel_min = 0.1

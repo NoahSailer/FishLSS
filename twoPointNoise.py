@@ -3,6 +3,7 @@ from twoPoint import *
 import twoPoint
 from castorina import castorinaBias,castorinaPn
 import scipy
+from input.reio_hist import Xhi
 
 
 '''
@@ -32,7 +33,12 @@ def compute_covariance_matrix(fishcast, zbin_index, nratio=1):
    # this assumes that the fiducial exeriment doesn't have any redshift errors, come up with a more general fix
    P_fid = fishcast.P_fid[zbin_index]
    if fishcast.recon: P_fid = fishcast.P_recon_fid[zbin_index]
-   C = prefactor * (P_fid-1/compute_n(fishcast, z)+1/nratio/number_density)**2.
+   if not fishcast.experiment.HI:
+      C = prefactor * (P_fid-1/compute_n(fishcast, z)+1/nratio/number_density)**2.
+   else: 
+      # since HI noise blows up at high k, I'm trying to avoid numerical from 
+      # subtracting O(1e20) from O(1e20)
+      C = prefactor * P_fid**2
    return np.maximum(C,1e-50) # avoiding numerical nonsense with possible 0's
 
 
@@ -254,16 +260,35 @@ def nofl(x, hexpack=True, Nside=256, D=6):
    res=n0*(a+b*xn)/(1+c*xn**d)*np.exp(-(xn)**e)
    return res
 
+def get_Tb(fishcast,z):
+   '''
+   Returns the mean 21cm brightness temp in K. 
+   If z < 6 use fitting formula from Eq. B1 of
+   https://arxiv.org/pdf/1810.09572.
+   '''
+   if z <= 6:
+       Ohi = 4e-4*(1+z)**0.6
+       h = fishcast.params_fid['h']
+       Ez = fishcast.cosmo_fid.Hubble(z)/fishcast.cosmo_fid.Hubble(0)
+       Tb = 188e-3*h/Ez*Ohi*(1+z)**2
+       return Tb
+   omb = fishcast.params_fid['omega_b']
+   omm = fishcast.params_fid['omega_cdm'] + omb
+   result = 28e-3 * ((1+z)*0.14/10/omm)**0.5
+   result *= omb/0.022
+   return result * (1-Xhi(z))
+    
 
-def HI_therm(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6, 
-           skycoupling=0.9, Tground=300., omtcoupling=0.9, Tampl=50.):
+def HI_therm(fishcast, z, effic=0.7, hexpack=True, skycoupling=0.9, 
+             Tground=300., omtcoupling=0.9, Tampl=50., old=False):
    '''
    Adapted from https://github.com/slosar/PUMANoise.
    Thermal noise power in Mpc^3/h^3. Thermal noise is 
    given by equation D4 in https://arxiv.org/pdf/1810.09572.
-   I divide by Tb (equation B1) to convert to Mpc^3/h^3.
+   I divide by Tb (see get_Tb) to convert to Mpc^3/h^3.
    Returns a function of k [h/Mpc] and mu.
    '''
+   D = fishcast.experiment.D
    ttotal = fishcast.experiment.tint*365*24*3600.*fishcast.experiment.fill_factor**2
    Nside = np.sqrt(fishcast.experiment.Ndetectors/fishcast.experiment.fill_factor)
    Hz = fishcast.cosmo_fid.Hubble(z)*(299792.458)/fishcast.params_fid['h'] # in h km/s/Mpc
@@ -272,18 +297,24 @@ def HI_therm(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6,
    r = (1.+z) * fishcast.cosmo_fid.angular_distance(z)*fishcast.params_fid['h'] # in Mpc/h
    Deff = D * np.sqrt(effic) 
    FOV = (lam / Deff)**2 
-   y = 3e5*(1+z)**2/(1420e6*Hz)
-   Ohi = 4e-4*(1+z)**0.6 
+   y = 3e5*(1+z)**2/(1420e6*Hz) 
    Sarea=4*np.pi*fishcast.experiment.fsky 
    Ae=np.pi/4*D**2*effic
    # k dependent terms
    kperp = lambda k,mu: k*np.sqrt(1.-mu**2.)
    l = lambda k,mu: kperp(k,mu) * r * lam / (2 * np.pi) 
-   def Nu(k,mu): 
-      result = nofl(l(k,mu),hexpack=hexpack,Nside=Nside,D=D)*lam**2
-      return np.maximum(result,1e-20)
+   def Nu(k,mu):
+      if old: return nofl(l(k,mu),hexpack=hexpack,Nside=Nside,D=D)*lam**2 
+      #
+      ll,pi2lnb = np.genfromtxt('input/baseline_bs_44_D_14.txt').T
+      nofl_new = interp1d(ll,pi2lnb/2/np.pi/ll,bounds_error=False,fill_value=0)
+      result = nofl_new(l(k,mu))*lam**2
+      result = np.maximum(result,1e-20)
+      I = np.where(l(k,mu) < D)
+      result[I] = 1e-20
+      return result
    # temperatures
-   Tb = 188e-3*(fishcast.params_fid['h'])/Ez*Ohi*(1+z)**2 
+   Tb = get_Tb(fishcast,z) 
    Tsky = lambda f: 25.*(f/400.)**(-2.75) +2.7
    Tscope = Tampl/omtcoupling/skycoupling+Tground*(1-skycoupling)/skycoupling
    Tsys = Tsky(1420./(1+z))+Tscope
@@ -293,9 +324,12 @@ def HI_therm(fishcast, z, effic=0.7, hexpack=True, Nside=256, D=6,
 
 def HI_shot(z): 
    '''
-   PUMA shot noise Mpc^3/h^3 from Emanuele Castorina.
+   PUMA shot noise Mpc^3/h^3 from Emanuele Castorina
+   for z < 6. For z > 6 assume that the shot noise
+   is 0.
    '''
-   return castorinaPn(z)
+   if z<= 6: return castorinaPn(z)
+   return 1e-10
 
 
 def HIneff(fishcast,z):

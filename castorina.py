@@ -175,6 +175,8 @@ z_, bias_, Psn_=np.array([[float(x) for x in line.split()] for line in
 5.9 	4.0567169	19.507655
 5.95	4.0939672	19.618291
 6.0  	4.131457 	19.737877
-6.1  	4.131457 	19.737877 """.split("\n")]).T
+6.1  	4.131457 	19.737877
+6.2  	4.131457 	1e-10
+20.1  	4.131457 	1e-10  """.split("\n")]).T
 castorinaBias=interp1d(z_,bias_)
 castorinaPn=interp1d(z_,Psn_)

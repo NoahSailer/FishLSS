@@ -88,11 +88,13 @@ class fisherForecast(object):
       else:
          self.set_experiment_and_cosmology_specific_parameters(experiment, cosmo, cosmo_fid)
       
-      if setup: self.create_json_summary()
+      self.create_json_summary()
       
-      if setup or overwrite: self.compute_fiducial_Pk_Cl(overwrite=overwrite)
+      if setup or overwrite: 
+            self.compute_fiducial_Pk(overwrite=overwrite)
+            self.compute_fiducial_Cl(overwrite=overwrite)
+            self.compute_fiducial_Precon(overwrite=overwrite)
       
-
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, cosmo_fid):
       self.experiment = experiment
       self.cosmo = cosmo
@@ -128,23 +130,45 @@ class fisherForecast(object):
       self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) \
                                for i in range(len(experiment.zedges)-1)])
        
-      redshifts = np.linspace(0,7,1000)
+      redshifts = np.linspace(0,20,1000)
       Da_fid = np.array([self.cosmo_fid.angular_distance(z) for z in redshifts])*self.params['h']
       Hz_fid = np.array([self.cosmo_fid.Hubble(z)*(299792.458)/self.params['h'] for z in redshifts])
       rsd_fid = np.array([self.cosmo_fid.get_current_derived_parameters(['rs_d'])['rs_d']*self.params['h'] for z in redshifts])
       self.Da_fid = interp1d(redshifts,Da_fid,kind='linear')
       self.Hz_fid = interp1d(redshifts,Hz_fid,kind='linear')
       self.rsd_fid = interp1d(redshifts,rsd_fid,kind='linear')
-      
 
-   def compute_fiducial_Pk_Cl(self, overwrite=False):
-
+        
+   def compute_fiducial_Pk(self, overwrite=False):
+    
       self.P_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
-      self.P_recon_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
+        
+      # Compute fiducial power spectra in each redshift bin
+      for i in range(self.experiment.nbins):
+         z = self.experiment.zcenters[i]
+         zmin = self.experiment.zedges[i]
+         zmax = self.experiment.zedges[i+1]
+         # P(k)
+         fname = 'output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt'
+         if not exists(fname) or overwrite:  
+            self.P_fid[i] = compute_tracer_power_spectrum(self,z)
+            np.savetxt(fname,self.P_fid[i])
+         else:
+            self.P_fid[i] = np.genfromtxt(fname)
+            
+      # setup the k_par cut  
+      self.kpar_cut = np.ones((self.experiment.nbins,self.Nk*self.Nmu))
+      for i in range(self.experiment.nbins): 
+         z = self.experiment.zcenters[i]
+         self.kpar_cut[i] = self.compute_kpar_cut(z,i)
+        
+        
+   def compute_fiducial_Cl(self, overwrite=False):
+
       self.Ckk_fid = np.zeros(len(self.ell))
       self.Ckg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
       self.Cgg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
-        
+
       # Ckk    
       fname = 'output/'+self.name+'/derivatives_Cl/Ckk_fid.txt'
       if not exists(fname) or overwrite:  
@@ -158,24 +182,6 @@ class fisherForecast(object):
          z = self.experiment.zcenters[i]
          zmin = self.experiment.zedges[i]
          zmax = self.experiment.zedges[i+1]
-         
-         # P(k)
-         fname = 'output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt'
-         if not exists(fname) or overwrite:  
-            self.P_fid[i] = compute_tracer_power_spectrum(self,z)
-            np.savetxt(fname,self.P_fid[i])
-         else:
-            self.P_fid[i] = np.genfromtxt(fname)
-
-         # P_recon(k)
-         fname = 'output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt'
-         if not exists(fname) or overwrite:  
-            self.recon = True
-            self.P_recon_fid[i] = compute_tracer_power_spectrum(self,z)
-            self.recon = False
-            np.savetxt(fname,self.P_recon_fid[i])
-         else:
-            self.P_recon_fid[i] = np.genfromtxt(fname)
             
          # Ckg
          fname = 'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
@@ -192,20 +198,38 @@ class fisherForecast(object):
             np.savetxt(fname,self.Cgg_fid[i])
          else:
             self.Cgg_fid[i] = np.genfromtxt(fname)
-          
-      # setup the k_par cut  
-      self.kpar_cut = np.ones((self.experiment.nbins,self.Nk*self.Nmu))
-      for i in range(self.experiment.nbins): 
+
+
+   def compute_fiducial_Precon(self, overwrite=False):
+
+      self.P_recon_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
+                
+      # Compute fiducial power spectra in each redshift bin
+      for i in range(self.experiment.nbins):
          z = self.experiment.zcenters[i]
-         self.kpar_cut[i] = self.compute_kpar_cut(z,i)
-         
+         zmin = self.experiment.zedges[i]
+         zmax = self.experiment.zedges[i+1]
+
+         # P_recon(k)
+         fname = 'output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt'
+         if not exists(fname) or overwrite:  
+            self.recon = True
+            self.P_recon_fid[i] = compute_tracer_power_spectrum(self,z)
+            self.recon = False
+            np.savetxt(fname,self.P_recon_fid[i])
+         else:
+            self.P_recon_fid[i] = np.genfromtxt(fname)
+          
          
    def create_json_summary(self):
       # 
       ze = list(self.experiment.zedges)
       zs = self.experiment.zcenters
       bs = list([float(compute_b(self,z)) for z in zs])
-      ns = list([float(compute_n(self,z)) for z in zs])
+      if self.experiment.HI:
+          ns = list([float(castorinaPn(z)) for z in zs])
+      else:
+          ns = list([float(compute_n(self,z)) for z in zs])
       
       data = {'Forecast name': self.name,
               'Edges of redshift bins': ze,
@@ -248,7 +272,7 @@ class fisherForecast(object):
       return self.experiment.fsky*(vbig - vsmall)*h**3.
 
 
-   def LegendreTrans(self,l,p):
+   def LegendreTrans(self,l,p,mu_max=1.):
       '''
       Returns the l'th multipole of P(k,mu), where P(k,mu) is a 
       vector of length Nk*Nmu. Returns a vector of length Nk.
@@ -344,8 +368,13 @@ class fisherForecast(object):
          except: absolute_step = 0.01
 
       b_fid = compute_b(self,z)    
-      f_fid = self.cosmo.scale_independent_growth_factor_f(z)    
-      alpha0_fid = 1.22 + 0.24*b_fid**2*(z-5.96) 
+      f_fid = self.cosmo.scale_independent_growth_factor_f(z)  
+      if z < 6 and self.experiment.alpha0 is None:
+         alpha0_fid = 1.22 + 0.24*b_fid**2*(z-5.96)
+      elif self.experiment.alpha0 is None:
+         alpha0_fid = 0.
+      if self.experiment.alpha0 is not None:
+         alpha0_fid = self.experiment.alpha0(z)
       Hz = self.Hz_fid(z)
       N_fid = 1/compute_n(self,z)
       noise = 1/compute_n(self,z)
@@ -403,6 +432,8 @@ class fisherForecast(object):
          return dPdtheta
        
       P_fid = compute_tracer_power_spectrum(**kwargs) 
+        
+      if param == 'norm': return 2*P_fid  
         
       if param == 'Tb': 
          Ez = self.cosmo.Hubble(z)/self.cosmo.Hubble(0)
@@ -589,7 +620,10 @@ class fisherForecast(object):
       else: zmid = self.experiment.zcenters[0] # Ckk, where b and stuff don't matter
             
       b_fid = compute_b(self,zmid)      
-      alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96) 
+      if zmid < 6:
+         alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96)
+      else: 
+         alpha0_fid = 0. 
       noise = 1/compute_n(self,zmid)
       if self.experiment.HI: noise = castorinaPn(zmid)
           
@@ -698,7 +732,7 @@ class fisherForecast(object):
       Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] # h km / s Mpc
       c = 299792.458 # km/s
       lambda21 = 0.21 * (1+z) # meters
-      D_eff = 6. * np.sqrt(0.7) # effective dish diameter, in meters
+      D_eff = self.experiment.D * np.sqrt(0.7) # effective dish diameter, in meters
       theta_w = self.experiment.N_w * 1.22 * lambda21 / (2.*D_eff)
       #
       wedge = kparallel > chi*Hz*np.sin(theta_w)*kperpendicular/(c*(1.+z))
@@ -892,8 +926,8 @@ class fisherForecast(object):
 
 
    def gen_fisher(self,basis,globe,log10z_c=-1.,omega_lin=-1.,kmax_knl=1.,
-                  kmin=0.003,kmax=-10.,kpar_min=-1.,derivatives=None,zbins=None,
-                  polys=True,simpson=False,nratio=1.):
+                  kmin=0.003,kmax=-10.,kpar_min=-1.,mu_min=-1,derivatives=None,
+                  zbins=None,polys=True,simpson=False,nratio=1.):
       '''
       Computes an array of Fisher matrices, one for each redshift bin.
       '''
@@ -915,7 +949,11 @@ class fisherForecast(object):
          ks = self.k.reshape(self.Nk,self.Nmu)[:,0] 
          constraints = self.compute_wedge(z,kmin=kmin)*self.kmax_constraint(z,kmax_knl)
          if kmax > 0: constraints = self.compute_wedge(z,kmin=kmin)*(self.k<kmax)
-         if kpar_min > 0: constraints *= (self.k*self.mu>kpar_min)
+         constraints *= (self.k > kmin)
+         kpar = self.k*self.mu
+         kperp = self.k*np.sqrt(1-self.mu**2)
+         if kpar_min > 0: constraints *= (kpar>kpar_min)
+         if mu_min > 0: constraints *= (kpar > kperp*mu_min/np.sqrt(1-mu_min**2))
          for i in range(n):
             for j in range(n):
                integrand = (dPdvecp[i]*Cinv*dPdvecp[j]*constraints) 
@@ -1031,7 +1069,7 @@ class fisherForecast(object):
       return f
     
     
-   def Nmodes(self,zmin,zmax,nbins,kpar=-1.,kmax=-1,alpha0=-1,alpha2=0,linear=False):
+   def Nmodes(self,zmin,zmax,nbins,kpar=-1.,kmax=-1,alpha0=-1,alpha2=0,linear=False,halofit=False):
     
       def G(z):
          Sigma2 = self.Sigma2(z)
@@ -1045,6 +1083,7 @@ class fisherForecast(object):
          P_L = compute_matter_power_spectrum(self,z,linear=True) * (b+f*MU**2.)**2.
          P_F = compute_tracer_power_spectrum(self,z,alpha0=alpha0,alpha2=alpha2)
          if linear: P_F = P_L + 1/compute_n(self,z)
+         if halofit: P_F = compute_matter_power_spectrum(self,z) * (b+f*MU**2.)**2. + 1/compute_n(self,z)
          integrand = ( G(z)**2 * P_L / P_F )**2. 
          integrand *= self.compute_wedge(z) 
          if kpar > 0.: integrand *= (self.k*self.mu > kpar)

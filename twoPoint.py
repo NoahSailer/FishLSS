@@ -11,6 +11,7 @@ from scipy.interpolate import InterpolatedUnivariateSpline as Spline
 from scipy.special import legendre
 
 #################################################################################################
+#################################################################################################
 # Biases for various surveys and probes.
 
 def LBGb(fishcast,z,m=24.5):
@@ -59,10 +60,14 @@ def MSEb(fishcast,z):
    return LBGb(fishcast,z,m=24.5)
 
 def HIb(z): return castorinaBias(z)
+ 
+#################################################################################################    
     
 def compute_b(fishcast,z):
    '''
-   Quick way of getting the bias. 
+   Quick way of getting the bias. This is what 
+   FishLSS always calls to get the bias from
+   a forecast.
    '''
    exp = fishcast.experiment
    custom = exp.custom_b
@@ -75,6 +80,7 @@ def compute_b(fishcast,z):
    if exp.Roman  and not custom: return Romanb(z)
    return exp.b(z)
 
+#################################################################################################
 #################################################################################################
 # scale-dependent growth rate (I'm not using this function anywhere)
 
@@ -160,13 +166,18 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
 
    if b == -1.: b = compute_b(fishcast,z)
    if b2 == -1 and exp.b2 is not None: b2 = exp.b2(z) 
+   if alpha0 == -1. and exp.alpha0 is not None: alpha0 = exp.alpha0(z)
    elif b2 == -1: b2 = 8*(b-1)/21
    if bs == -1: bs = -2*(b-1)/7
    if f == -1.: f = fishcast.cosmo.scale_independent_growth_factor_f(z)
    if A_lin == -1.: A_lin = fishcast.A_lin
    if omega_lin == -1.: omega_lin = fishcast.omega_lin
    if phi_lin == -1.: phi_lin = fishcast.phi_lin 
-   if alpha0 == -1: alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
+   if alpha0 == -1 and exp.alpha0 is None: 
+      if z < 6:
+         alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
+      else: 
+         alpha0 = 0.
    if N is None: N = 1/compute_n(fishcast,z)
    #
    noise = 1/compute_n(fishcast,z)
@@ -230,7 +241,11 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
    if b == -1.: b = compute_b(fishcast,z)
    if b2 == -1: b2 = 8*(b-1)/21
    if bs == -1: bs = -2*(b-1)/7
-   if alpha0 == -1: alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
+   if alpha0 == -1: 
+      if z < 6:
+         alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
+      else: 
+         alpha0 = 0.
    if N == None: 
       N = 1/compute_n(fishcast,z)
       if fishcast.experiment.HI: N = castorinaPn(z)
@@ -300,7 +315,10 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    b_fid = compute_b(fishcast,zmid)  
    b2_fid = 8*(b_fid-1)/21
    bs_fid = -2*(b_fid-1)/7
-   alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96) 
+   if zmid < 6:
+      alpha0_fid = 1.22 + 0.24*b**2*(zmid-5.96) 
+   else: 
+      alpha0_fid = 0. 
    N_fid = 1/compute_n(fishcast,zmid)
    if fishcast.experiment.HI: N_fid = castorinaPn(zmid)
         
@@ -353,7 +371,11 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    bz = lambda z: compute_b(fishcast,z) * b/b_fid
    b2z = lambda z: 8*(compute_b(fishcast,z)-1)/21 * b2/b2_fid
    bsz = lambda z: -2*(compute_b(fishcast,z)-1)/7 * bs/bs_fid
-   alpha0z = lambda z: (1.22 + 0.24*compute_b(fishcast,z)**2*(z-5.96)) * alpha0/alpha0_fid
+   def alpha0z(z):
+      if z<6:
+         return (1.22 + 0.24*compute_b(fishcast,z)**2*(z-5.96)) * alpha0/alpha0_fid
+      else:
+         return alpha0
    def Nz(z):
       if X == Y and X == 'k': return 0
       if not fishcast.experiment.HI: return 1/compute_n(fishcast,z) * N/N_fid
