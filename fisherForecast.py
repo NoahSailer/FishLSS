@@ -10,19 +10,20 @@ from os.path import exists
 
 class fisherForecast(object):
    '''
-   Capable of calculating the galaxy power spectrum and its derivatives
-   with respect to cosmological parameters. Able to calculate the
-   Fisher matrix for an arbitrary number of parameters.
+   Class for computing derivatives of the galaxy (full-shape)
+   power spectrum, as well as the CMB lensing cross-/auto spectrum.
+   Can build and combine Fisher matrices formed from both of these
+   observables.
    '''
    def __init__(self, 
-                kmin=5e-4, 
-                kmax=1., 
                 cosmo=None, 
                 cosmo_fid=None,
                 experiment=None, 
+                kmin=5e-4, 
+                kmax=1., 
                 Nmu=50, 
                 Nk=500, 
-                marg_params=np.array(['A_s','h']),
+                free_params=np.array(['h']),
                 fEDE=0., 
                 log10z_c=3.56207, 
                 thetai_scf=2.83, 
@@ -39,13 +40,16 @@ class fisherForecast(object):
                 ell=np.arange(10,1000,1),
                 N2cut=0.2,
                 setup=True,
-                overwrite=False):
+                overwrite=False,
+                basedir=''):
         
+      # some basic stuff for the k-mu grid  
       self.kmin = kmin
       self.kmax = kmax
       self.Nmu = Nmu
       self.Nk = Nk
-      self.marg_params = marg_params
+      # free parameters in the forecast
+      self.free_params = free_params
       # parameters for EDE. These are redundant if fEDE has a nonzero fiducial value.
       self.fEDE = fEDE
       self.log10z_c = log10z_c
@@ -65,21 +69,34 @@ class fisherForecast(object):
       self.recon = recon
       self.ell = ell
       self.N2cut = N2cut
+      self.basedir = basedir
+      
+      # Set up the k-mu grid 
+      k = np.logspace(np.log10(self.kmin),np.log10(self.kmax),self.Nk) # [h/Mpc]
+      dk = list(k[1:]-k[:-1])
+      dk.insert(0,dk[0])
+      dk = np.array(dk)
+      self.k = np.repeat(k,self.Nmu)
+      self.dk = np.repeat(dk,self.Nmu)
+      #
+      mu = np.linspace(0.,1.,self.Nmu)
+      dmu = list(mu[1:]-mu[:-1])
+      dmu.append(dmu[-1])
+      dmu = np.array(dmu)
+      self.mu = np.tile(mu,self.Nk)
+      self.dmu = np.tile(dmu,self.Nk)
 
-      self.experiment = None
-      self.cosmo = None
-      self.k = None  # [h/Mpc]
-      self.dk = None
-      self.mu = None
-      self.dmu = None
+      # we set these up later
+      self.experiment = None     # 
+      self.cosmo = None          # CLASS object
       self.P_fid = None          # fidicual power spectra at the center of each redshift bin
-      self.P_recon_fid = None
+      self.P_recon_fid = None    # fiducial reconstructed power spectra "..."
       self.Vsurvey = None        # comoving volume [Mpc/h]^3 in each redshift bin
-      self.params = None
+      self.params = None         # CLASS parameters
     
       # make directories for storing derivatives and fiducial power spectra
       o,on = 'output/','output/'+self.name+'/'
-      directories = np.array([o,on,on+'/derivatives/',on+'/derivatives_Cl/',on+'/derivatives_recon/'])
+      directories = np.array([o, on, on+'/derivatives/', on+'/derivatives_Cl/', on+'/derivatives_recon/'])
       for directory in directories: 
          if not os.path.exists(directory): os.mkdir(directory)
 
@@ -94,53 +111,74 @@ class fisherForecast(object):
             self.compute_fiducial_Pk(overwrite=overwrite)
             self.compute_fiducial_Cl(overwrite=overwrite)
             self.compute_fiducial_Precon(overwrite=overwrite)
-      
+
+
+
+                                     ##
+                                   #### 
+                                  #####  
+                                    ###
+                                    ###
+                                    ###
+                                    ###
+                                    ###
+                                  #######  
+   
+   
+   #######################################################################
+   #######################################################################
+   ## This section of the code is used to set up the forecast object 
+   ## Computes (or loads) fiducial power spectra, sets up distances, ...
+   
+        
    def set_experiment_and_cosmology_specific_parameters(self, experiment, cosmo, cosmo_fid):
+      '''
+      Set up the experiment- and cosmology-dependent pieces of the forecast
+      '''
       self.experiment = experiment
       self.cosmo = cosmo
       params = cosmo.pars
+      
+      # it's useful when taking derivatives 
+      # to have access to the fiducial cosmology
       if cosmo_fid is None:
          cosmo_fid = Class()
          cosmo_fid.set(params)
          cosmo_fid.compute()
-      self.cosmo_fid = cosmo_fid # it's useful when taking derivatives 
-                                 # to have access to the fiducial cosmology
+      self.cosmo_fid = cosmo_fid 
+      
       self.params = params
       self.params_fid = cosmo_fid.pars
-      if 'log(A_s)' in self.marg_params and 'A_s' not in np.array(list(params.keys())):
-         print('Must include A_s in params if trying to marginalize over log(A_s).')
+      if 'log(A_s)' in self.free_params and 'A_s' not in np.array(list(params.keys())):
+         print('Must include A_s in CLASS params if trying to take derivatives w.r.t. log(A_s).')
          return
       if 'fEDE' in np.array(list(params.keys())):
          self.fEDE = params['fEDE']
          self.log10z_c = params['log10z_c']
          self.thetai_scf = params['thetai_scf']
-      k = np.logspace(np.log10(self.kmin),np.log10(self.kmax),self.Nk)
-      dk = list(k[1:]-k[:-1])
-      dk.insert(0,dk[0])
-      dk = np.array(dk)
-      mu = np.linspace(0.,1.,self.Nmu)
-      dmu = list(mu[1:]-mu[:-1])
-      dmu.append(dmu[-1])
-      dmu = np.array(dmu)
-      self.k = np.repeat(k,self.Nmu)
-      self.dk = np.repeat(dk,self.Nmu)
-      self.mu = np.tile(mu,self.Nk)
-      self.dmu = np.tile(dmu,self.Nk)
-    
-      self.Vsurvey = np.array([self.comov_vol(experiment.zedges[i],experiment.zedges[i+1]) \
-                               for i in range(len(experiment.zedges)-1)])
-       
-      redshifts = np.linspace(0,20,1000)
-      Da_fid = np.array([self.cosmo_fid.angular_distance(z) for z in redshifts])*self.params['h']
-      Hz_fid = np.array([self.cosmo_fid.Hubble(z)*(299792.458)/self.params['h'] for z in redshifts])
-      rsd_fid = np.array([self.cosmo_fid.get_current_derived_parameters(['rs_d'])['rs_d']*self.params['h'] for z in redshifts])
-      self.Da_fid = interp1d(redshifts,Da_fid,kind='linear')
-      self.Hz_fid = interp1d(redshifts,Hz_fid,kind='linear')
-      self.rsd_fid = interp1d(redshifts,rsd_fid,kind='linear')
+
+      # Fiducial volume in each redshift bin
+      edges = experiment.zedges
+      num_bins = len(experiment.zedges) - 1
+      self.Vsurvey = np.array([self.comov_vol(edges[i],edges[i+1]) for i in range(num_bins)])
+          
+      # Fiducial distances as a function of z
+      # Da = angular diameter distance [Mpc/h]
+      # Hz = hubble [h km/s/Mpc]
+      zs = np.linspace(0,60,1000)
+      h = self.params['h']
+      c = 299792.458 # speed of light in km/s
+      Da_fid = np.array([self.cosmo_fid.angular_distance(z)*h for z in zs])
+      Hz_fid = np.array([self.cosmo_fid.Hubble(z)*c/h for z in zs])
+      # interpolate
+      self.Da_fid = interp1d(zs,Da_fid,kind='linear')
+      self.Hz_fid = interp1d(zs,Hz_fid,kind='linear')
 
         
    def compute_fiducial_Pk(self, overwrite=False):
-    
+      '''
+      Either compute or load fiducial full-shape power spectra
+      '''
       self.P_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
         
       # Compute fiducial power spectra in each redshift bin
@@ -149,7 +187,7 @@ class fisherForecast(object):
          zmin = self.experiment.zedges[i]
          zmax = self.experiment.zedges[i+1]
          # P(k)
-         fname = 'output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt'
+         fname = self.basedir+'output/'+self.name+'/derivatives/pfid_'+str(int(100*z))+'.txt'
          if not exists(fname) or overwrite:  
             self.P_fid[i] = compute_tracer_power_spectrum(self,z)
             np.savetxt(fname,self.P_fid[i])
@@ -164,13 +202,15 @@ class fisherForecast(object):
         
         
    def compute_fiducial_Cl(self, overwrite=False):
-
+      '''
+      Either compute or load fiducial C_ells (Ckk, Ckg, Cgg)
+      '''
       self.Ckk_fid = np.zeros(len(self.ell))
       self.Ckg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
       self.Cgg_fid = np.zeros((self.experiment.nbins,len(self.ell)))
 
       # Ckk    
-      fname = 'output/'+self.name+'/derivatives_Cl/Ckk_fid.txt'
+      fname = self.basedir+'output/'+self.name+'/derivatives_Cl/Ckk_fid.txt'
       if not exists(fname) or overwrite:  
          self.Ckk_fid = compute_lensing_Cell(self,'k','k')
          np.savetxt(fname,self.Ckk_fid)
@@ -184,7 +224,7 @@ class fisherForecast(object):
          zmax = self.experiment.zedges[i+1]
             
          # Ckg
-         fname = 'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
+         fname = self.basedir+'output/'+self.name+'/derivatives_Cl/Ckg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
          if not exists(fname) or overwrite:
             self.Ckg_fid[i] = compute_lensing_Cell(self,'k','g',zmin,zmax)
             np.savetxt(fname,self.Ckg_fid[i])
@@ -192,7 +232,7 @@ class fisherForecast(object):
             self.Ckg_fid[i] = np.genfromtxt(fname)
          
          # Cgg
-         fname = 'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
+         fname = self.basedir+'output/'+self.name+'/derivatives_Cl/Cgg_fid_'+str(int(100*zmin))+'_'+str(int(100*zmax))+'.txt'
          if not exists(fname) or overwrite:
             self.Cgg_fid[i] = compute_lensing_Cell(self,'g','g',zmin,zmax)
             np.savetxt(fname,self.Cgg_fid[i])
@@ -201,7 +241,9 @@ class fisherForecast(object):
 
 
    def compute_fiducial_Precon(self, overwrite=False):
-
+      '''
+      Either compute or load reconstructed power spectra
+      '''
       self.P_recon_fid = np.zeros((self.experiment.nbins,self.Nk*self.Nmu))
                 
       # Compute fiducial power spectra in each redshift bin
@@ -211,7 +253,7 @@ class fisherForecast(object):
          zmax = self.experiment.zedges[i+1]
 
          # P_recon(k)
-         fname = 'output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt'
+         fname = self.basedir+'output/'+self.name+'/derivatives_recon/pfid_'+str(int(100*z))+'.txt'
          if not exists(fname) or overwrite:  
             self.recon = True
             self.P_recon_fid[i] = compute_tracer_power_spectrum(self,z)
@@ -222,7 +264,10 @@ class fisherForecast(object):
           
          
    def create_json_summary(self):
-      # 
+      '''
+      Creates and stores a .json file in output/forecast_name/
+      This file summarizes some of the basic forecast details
+      '''
       ze = list(self.experiment.zedges)
       zs = self.experiment.zcenters
       bs = list([float(compute_b(self,z)) for z in zs])
@@ -257,8 +302,8 @@ class fisherForecast(object):
       kpar_cut = np.ones(self.Nk*self.Nmu)
       kpar_cut[idx] = 0 ; kpar_cut[idx2] = 0 
       return kpar_cut
-     
-        
+
+         
    def comov_vol(self,zmin,zmax):
       '''
       Returns the comoving volume in (Mpc/h)^3 between 
@@ -271,6 +316,24 @@ class fisherForecast(object):
       vbig = (4*np.pi/3) * chi(zmax)**3.
       return self.experiment.fsky*(vbig - vsmall)*h**3.
 
+                                      
+                                  ### 
+                                #######
+                               #########
+                               ###   ### 
+                               ###   ###
+                                     ###
+                                    ###
+                                  ###
+                                 ###
+                               #########
+                               #########
+   
+   
+   #######################################################################
+   #######################################################################
+   ## This section contains some helper-functions
+   ##
 
    def LegendreTrans(self,l,p,mu_max=1.):
       '''
@@ -289,9 +352,9 @@ class fisherForecast(object):
       
    def LegendreTransInv(self,pls):
       '''
-      Given pls = [p0,p2,p4,...], returns P(k,mu). 
-      pn is an array of length Nk. P(k,mu) is an array 
-      of length Nk*Nmu.
+      Given pls = [p0,p2,p4,...], where each pn is an 
+      array of length Nk, returns P(k,mu), which is 
+      an array of length Nk*Nmu.
       '''
       n = len(pls)
       pls_repeat = np.zeros((n,self.Nk*self.Nmu))
@@ -303,7 +366,13 @@ class fisherForecast(object):
       
       
    def dPdk(self,P):
-      # assumes that k is log spaced
+      '''
+      Given an input array P (length Nk*Nmu), which is 
+      defined on the (flattened) k-mu grid, returns 
+      dPdk on that same grid. 
+      
+      assumes that k is log spaced
+      '''
       P_reshaped = P.reshape((self.Nk,self.Nmu)) 
       P_low  = np.roll(P_reshaped,1,axis=0)
       P_low2 = np.roll(P_reshaped,2,axis=0)
@@ -326,7 +395,13 @@ class fisherForecast(object):
    
    
    def dPdmu(self,P):
-      # assumes that mu is lin spaced
+      '''
+      Given an input array P (length Nk*Nmu), which is 
+      defined on the (flattened) k-mu grid, returns 
+      dPdmu on that same grid. 
+      
+      ssumes that mu is lin spaced
+      '''
       P_reshaped = P.reshape((self.Nk,self.Nmu)) 
       P_low  = np.roll(P_reshaped,1,axis=1)
       P_low2 = np.roll(P_reshaped,2,axis=1)
@@ -752,7 +827,7 @@ class fisherForecast(object):
             else: filename = p+'_'+str(int(100*z[i]))+'.txt'
             folder = '/derivatives/'
             if self.recon: folder = '/derivatives_recon/'
-            fname = 'output/'+self.name+folder+filename
+            fname = self.basedir+'output/'+self.name+folder+filename
             if not exists(fname) or overwrite: 
                dPdp = self.compute_dPdp(param=p, z=z[i], five_point=five_point)
                np.savetxt(fname,dPdp)
@@ -761,15 +836,15 @@ class fisherForecast(object):
          return
       zs = self.experiment.zcenters
       for z in zs:
-         for marg_param in self.marg_params:
-            if marg_param == 'fEDE': filename = 'fEDE_'+str(int(1000.*self.log10z_c))+'_'+str(int(100*z))+'.txt'
-            elif marg_param == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z))+'.txt'
-            else: filename = marg_param+'_'+str(int(100*z))+'.txt'
+         for free_param in self.free_params:
+            if free_param == 'fEDE': filename = 'fEDE_'+str(int(1000.*self.log10z_c))+'_'+str(int(100*z))+'.txt'
+            elif free_param == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z))+'.txt'
+            else: filename = free_param+'_'+str(int(100*z))+'.txt'
             folder = '/derivatives/'
             if self.recon: folder = '/derivatives_recon/'
-            fname = 'output/'+self.name+folder+filename
+            fname = self.basedir+'output/'+self.name+folder+filename
             if not exists(fname) or overwrite:
-               dPdp = self.compute_dPdp(param=marg_param, z=z, five_point=five_point)
+               dPdp = self.compute_dPdp(param=free_param, z=z, five_point=five_point)
                np.savetxt(fname,dPdp)
             else:
                continue
@@ -778,42 +853,42 @@ class fisherForecast(object):
    def compute_Cl_derivatives(self, five_point=True, overwrite=False):
       '''
       Calculates the derivatives of Ckk, Ckg, and Cgg with respect to 
-      each of the marg_params. 
+      each of the free_params. 
       '''
       zs = self.experiment.zedges
-      for marg_param in self.marg_params:
+      for free_param in self.free_params:
          #
-         if marg_param != 'gamma':
-            filename = 'Ckk_'+marg_param+'.txt'
-            fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+         if free_param != 'gamma':
+            filename = 'Ckk_'+free_param+'.txt'
+            fname = self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename
             if not exists(fname) or overwrite: 
-               dCdp = self.compute_dCdp(marg_param, 'k', 'k', five_point=five_point)
+               dCdp = self.compute_dCdp(free_param, 'k', 'k', five_point=five_point)
                np.savetxt(fname,dCdp)
             else:
                continue
          else:
             for i,z in enumerate(zs[:-1]):
-               filename = 'Ckk_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
-               fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+               filename = 'Ckk_'+free_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
+               fname = self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename
                if not exists(fname) or overwrite: 
-                  dCdp = self.compute_dCdp(marg_param, 'k', 'k',zmin=zs[i],zmax=zs[i+1], five_point=five_point)
+                  dCdp = self.compute_dCdp(free_param, 'k', 'k',zmin=zs[i],zmax=zs[i+1], five_point=five_point)
                   np.savetxt(fname,dCdp)
                else:
                   continue
          #
          for i,z in enumerate(zs[:-1]):
-            filename = 'Cgg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
-            fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+            filename = 'Cgg_'+free_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
+            fname = self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename
             if not exists(fname) or overwrite: 
-               dCdp = self.compute_dCdp(marg_param, 'g', 'g', zmin=zs[i], zmax=zs[i+1], five_point=five_point)
+               dCdp = self.compute_dCdp(free_param, 'g', 'g', zmin=zs[i], zmax=zs[i+1], five_point=five_point)
                np.savetxt(fname,dCdp) 
             else:
                continue
             
-            filename = 'Ckg_'+marg_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
-            fname = 'output/'+self.name+'/derivatives_Cl/'+filename
+            filename = 'Ckg_'+free_param+'_'+str(int(100*zs[i]))+'_'+str(int(100*zs[i+1]))+'.txt'
+            fname = self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename
             if not exists(fname) or overwrite: 
-               dCdp = self.compute_dCdp(marg_param, 'k', 'g', zmin=zs[i], zmax=zs[i+1], five_point=five_point)
+               dCdp = self.compute_dCdp(free_param, 'k', 'g', zmin=zs[i], zmax=zs[i+1], five_point=five_point)
                np.savetxt(fname,dCdp)
             else:
                continue
@@ -823,7 +898,7 @@ class fisherForecast(object):
       '''
       Plots all the derivatives in the output/forecast name/derivatives directory
       '''
-      directory = 'output/'+self.name+'/derivatives'
+      directory = self.basedir+'output/'+self.name+'/derivatives'
       for root, dirs, files in os.walk(directory, topdown=False):
          for file in files:
             filename = os.path.join(directory, file)
@@ -861,7 +936,7 @@ class fisherForecast(object):
       derivatives = np.empty((nbins,N,self.Nk*self.Nmu))
       folder = '/derivatives/'
       if self.recon: folder = '/derivatives_recon/'
-      directory = 'output/'+self.name+folder
+      directory = self.basedir+'output/'+self.name+folder
         
       for zbin_index in range(nbins):
          z = self.experiment.zcenters[zbin_index]
@@ -992,29 +1067,29 @@ class fisherForecast(object):
       if param_index >= globe:
          m = zbin_index+1
          filename = 'Ckg_'+param+'_'+str(int(100*zs[m-1]))+'_'+str(int(100*zs[m]))+'.txt'   
-         result[m] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename)
+         result[m] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename)
          filename = 'Cgg_'+param+'_'+str(int(100*zs[m-1]))+'_'+str(int(100*zs[m]))+'.txt' 
-         result[m+n] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename)
+         result[m+n] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename)
          return result
     
       if not 'gamma' in param: 
-         result[0] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/Ckk_'+param+'.txt')
+         result[0] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/Ckk_'+param+'.txt')
       else:
          idx = int(param[-1])
          filename = 'Ckk_gamma_'+str(int(100*zs[idx-1]))+'_'+str(int(100*zs[idx]))+'.txt'
-         result[0] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename) 
+         result[0] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename) 
       for i in range(1,n+1):
          if 'gamma' in param: 
             idx = int(param[-1])
             filename = 'Ckg_gamma_'+str(int(100*zs[idx-1]))+'_'+str(int(100*zs[idx]))+'.txt'
-            result[idx] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename)
+            result[idx] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename)
             filename = 'Cgg_gamma_'+str(int(100*zs[idx-1]))+'_'+str(int(100*zs[idx]))+'.txt'
-            result[idx+n] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename)
+            result[idx+n] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename)
          else:
             filename = 'Ckg_'+param+'_'+str(int(100*zs[i-1]))+'_'+str(int(100*zs[i]))+'.txt'
-            result[i] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename)
+            result[i] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename)
             filename = 'Cgg_'+param+'_'+str(int(100*zs[i-1]))+'_'+str(int(100*zs[i]))+'.txt'
-            result[i+n] = np.genfromtxt('output/'+self.name+'/derivatives_Cl/'+filename)
+            result[i+n] = np.genfromtxt(self.basedir+'output/'+self.name+'/derivatives_Cl/'+filename)
       return result
 
     
