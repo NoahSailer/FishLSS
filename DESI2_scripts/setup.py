@@ -91,7 +91,7 @@ def do_task(sfb,task,fsky):
        cosmo = Class() 
        cosmo.set(params) 
        cosmo.compute() 
-       forecast = forecast = make_forecast(cosmo,sfb,task,fsky)
+       forecast = make_forecast(cosmo,sfb,task,fsky)
        basis = np.array(['alpha_perp','alpha_parallel','b'])
        forecast.recon = True
        forecast.free_params = basis
@@ -106,7 +106,7 @@ def do_task(sfb,task,fsky):
        cosmo = Class() 
        cosmo.set(params) 
        cosmo.compute() 
-       forecast = forecast = make_forecast(cosmo,sfb,task,fsky)
+       forecast = make_forecast(cosmo,sfb,task,fsky)
        basis = np.array(['log(A_s)','N','alpha0','b','b2','bs','N2','N4','alpha2','alpha4'])
        forecast.free_params = basis
        forecast.compute_derivatives(five_point=False)
@@ -122,10 +122,26 @@ def do_task(sfb,task,fsky):
        cosmo = Class() 
        cosmo.set(params) 
        cosmo.compute() 
-       forecast = forecast = make_forecast(cosmo,sfb,task,fsky)
+       forecast = make_forecast(cosmo,sfb,task,fsky)
        basis = np.array(['log(A_s)','N','alpha0','b','b2','bs','alphax'])
        forecast.free_params = basis
        forecast.compute_Cl_derivatives(five_point=False)
+       #
+   elif task == 'alin':
+       omega_lins = np.arange(25.,501.,25.)
+       params = {'output': 'mPk'}
+       for k in default_cosmo.keys():
+           params[k] = default_cosmo[k]
+       #
+       cosmo = Class()
+       cosmo.set(params)
+       cosmo.compute()
+       forecast = make_forecast(cosmo,sfb,task,fsky)
+       basis = np.array(['A_lin'])
+       forecast.free_params = basis
+       for wlin in omega_lins:
+           forecast.omega_lin = wlin
+           forecast.compute_derivatives(five_point=False)
     else:
         raise RuntimeError("Unknown task "+str(task))
     #
