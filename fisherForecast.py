@@ -524,7 +524,7 @@ class fisherForecast(object):
          K,MU = self.k,self.mu
          return -2*P_fid + MU*(1-MU**2)*self.dPdmu(P_fid) - K*(1-MU**2)*self.dPdk(P_fid)       
             
-      def one_sided(param,step):  
+      def one_sided_deriv(param,step):  
          self.cosmo.set({param:step})
          self.cosmo.compute()
          P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
@@ -569,16 +569,13 @@ class fisherForecast(object):
                        'scf_parameters':'1, 1, 1, 1, 1, 0.0',
                        'attractor_ic_scf':'no'}
          self.cosmo.set(EDE_params)
-         return one_sided('fEDE',absolute_step)
-           
-      if param == 'xi_idr' and self.xi_idr == 0.: 
-         idr_params = {'xi_idr':0.,'a_idm_dr':1e4,'f_idm_dr':1.}
-         self.cosmo.set(idr_params)
-         return one_sided('xi_idr',absolute_step)
+         return one_sided_deriv('fEDE',absolute_step)
          
       if (param == 'log10z_c' or param == 'thetai_scf') and self.fEDE == 0.:
          print('Attempted to marginalize over log10z_c or thetai_scf when fEDE has a fiducial value of 0.')
          return
+         
+      if one_sided: return one_sided_deriv(param,absolute_step)
     
       result = np.zeros(len(self.k))
       
@@ -815,7 +812,7 @@ class fisherForecast(object):
       return wedge*kparallel_constraint
     
     
-   def compute_derivatives(self, five_point=True, parameters=None, z=None, overwrite=False):
+   def compute_derivatives(self, five_point=True, parameters=None, z=None, overwrite=False, one_sided=False):
       '''
       Calculates all the derivatives and saves them to the 
       output/forecast name/derivatives directory
@@ -829,7 +826,7 @@ class fisherForecast(object):
             if self.recon: folder = '/derivatives_recon/'
             fname = self.basedir+'output/'+self.name+folder+filename
             if not exists(fname) or overwrite: 
-               dPdp = self.compute_dPdp(param=p, z=z[i], five_point=five_point)
+               dPdp = self.compute_dPdp(param=p, z=z[i], five_point=five_point, one_sided=one_sided)
                np.savetxt(fname,dPdp)
             else:
                continue
@@ -844,7 +841,7 @@ class fisherForecast(object):
             if self.recon: folder = '/derivatives_recon/'
             fname = self.basedir+'output/'+self.name+folder+filename
             if not exists(fname) or overwrite:
-               dPdp = self.compute_dPdp(param=free_param, z=z, five_point=five_point)
+               dPdp = self.compute_dPdp(param=free_param, z=z, five_point=five_point, one_sided=one_sided)
                np.savetxt(fname,dPdp)
             else:
                continue
