@@ -23,7 +23,7 @@ lensing auto/cross spectrum with repsect to any CLASS parameter, in addition to
 
 -------
 
-Below is a very quick example showing how to create a forecasting object, calculate derivatives of the redshift-space galaxy power spectrum, and generate a Fisher matrix. See notebooks/
+Below is a very quick example showing how to create a forecasting object, calculate derivatives of the redshift-space galaxy power spectrum, and generate a Fisher matrix. See notebooks/ for more examples.
 ```
 # import dependencies
 from headers import *
