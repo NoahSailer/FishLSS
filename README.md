@@ -20,25 +20,25 @@ At the moment all code and notebooks should be run from the ```FishLSS/``` direc
 
 Fisher forecasting codes compute the Fisher information matrix for a set of **observables** and model **parameters**. ``FishLSS`` is set up to model the following observables:
 
-- the redshift-space power spectrum of any biased tracer of the CDM+baryon field <img src="https://latex.codecogs.com/svg.latex?P_{gg}(k,\mu)" /> 
+- the redshift-space power spectrum of any biased tracer of the CDM+baryon field 
 
 - the post-reconstruction galaxy power spectrum
 
-- the projected cross-correlation of galaxies with the CMB lensing convergence <img src="https://latex.codecogs.com/svg.latex?C^{\kappa g}_\ell" />, the projected galaxy power spectrum <img src="https://latex.codecogs.com/svg.latex?C^{g g}_\ell" />, and the CMB lensing convergence power spectrum <img src="https://latex.codecogs.com/svg.latex?C^{\kappa\kappa}_\ell" />
+- the projected cross-correlation of galaxies with the CMB lensing convergence, the projected galaxy power spectrum, and the CMB lensing convergence power spectrum
 
-With the exception of <img src="https://latex.codecogs.com/svg.latex?C^{\kappa\kappa}_\ell" />, which is modeled with ```HaloFit```, all of these observables are modeled self-consistently using 1-loop Lagrangian perturbation theory (i.e. ```velocileptors```).
+With the exception of the CMB lensing convergence power spectrum, which is modeled with ```HaloFit```, all of these observables are modeled self-consistently using 1-loop Lagrangian perturbation theory (i.e. ```velocileptors```).
 
 ```FishLSS``` can compute the derivatives, and hence the Fisher information from the observables listed above, with respect to the following sets of parameters:
 
-- any standard ```CLASS``` input <img src="https://latex.codecogs.com/svg.latex?(\omega_{b},n_s,A_s,\cdots)" />, or any extra parameters introduced by a modified version of ```CLASS``` (e.g. the maximum amplitude <img src="https://latex.codecogs.com/svg.latex?f_\text{EDE}" /> of Early Dark Energy using ```CLASS_EDE```)
+- any standard ```CLASS``` input, or any extra parameters introduced by a modified version of ```CLASS``` (e.g. the maximum amplitude of Early Dark Energy when running ```CLASS_EDE```)
 
-- Bias parameters, counterterms and stochastic contributions <img src="https://latex.codecogs.com/svg.latex?(b,\,b_2,\,b_s,\,\alpha_{2n},\,\alpha_x,\,N_{2n})" /> 
+- bias parameters, counterterms and stochastic contributions
 
-- The fixed-template BAO parameters <img src="https://latex.codecogs.com/svg.latex?(\alpha_\parallel,\alpha_\perp)" /> 
+- the fixed-template BAO parameters 
 
-- (linear) primordial features <img src="https://latex.codecogs.com/svg.latex?(A_\text{lin},\,\omega_\text{lin},\,\phi_\text{lin})" /> 
+- (linear) primordial features 
 
-- Local <img src="https://latex.codecogs.com/svg.latex?f_\text{NL}"/>  through its effect on scale dependent bias, assuming the tenuous <img src="https://latex.codecogs.com/svg.latex?b_\phi = 2 \delta_c(b-1)"/> relationship
+- local primordial non-Gaussianity through its effect on scale dependent bias
 
 -------
 
