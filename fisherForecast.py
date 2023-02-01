@@ -1091,11 +1091,12 @@ class fisherForecast(object):
 
     
    def gen_lensing_fisher(self,basis,globe,ell_min=30,ell_max=1900,kmax_knl=1,
-                          CMB='SO',kk=True,only_kk=False,bins=None):
+                          CMB='SO',kk=True,only_kk=False,bins=None,fsky_CMB=0.4,
+                          fsky_intersect=None):
       '''
       '''
       n = len(basis)
-      C = covariance_Cls(self,kmax_knl=kmax_knl,CMB=CMB)
+      C = covariance_Cls(self,kmax_knl=kmax_knl,CMB=CMB,fsky_CMB=fsky_CMB,fsky_intersect=fsky_intersect)
       Nz = self.experiment.nbins
       loc = n - globe
       N = globe + loc*Nz

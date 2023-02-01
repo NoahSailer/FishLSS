@@ -90,7 +90,7 @@ def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO',fsky_CMB=0.4,fsky_intersect=Non
       Ckgi = fishcast.Ckg_fid[i] 
       Cgigi = fishcast.Cgg_fid[i]
       # kk, kg
-      C[i+1,0] = 2*(Ckk + Nkk) * Ckgi/(2*l+1)*constraint[i] * fsky_intersect / fsky_LSS / fsky_CMB
+      C[i+1,0] = 2*(Ckk + Nkk) * Ckgi/(2*l+1)*constraint[i] / fsky_CMB
       C[0,i+1] = C[i+1,0]
       # kk, gg
       C[i+1+n,0] = 2*Ckgi**2/(2*l+1)*constraint[i] * fsky_intersect / fsky_LSS / fsky_CMB
@@ -101,7 +101,7 @@ def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO',fsky_CMB=0.4,fsky_intersect=Non
          # kgi, kgj
          C[i+1,j+1] = Ckgi*Ckgj*constraint[i]*constraint[j]
          if i == j: C[i+1,j+1] += (Ckk + Nkk)*Cgigi*constraint[i]
-         C[i+1,j+1] /= (2*l+1) * fsky_LSS
+         C[i+1,j+1] /= (2*l+1) * fsky_intersect
          # gigi, gjgj
          if i == j: C[i+1+n,j+1+n] = 2*Cgigi**2 / (2*l+1)*constraint[i] / fsky_LSS
          # kgi, gjgj
