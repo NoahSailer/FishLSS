@@ -1,19 +1,18 @@
 [![](https://img.shields.io/badge/arXiv-2106.09713%20-red.svg)](https://arxiv.org/abs/2106.09713)
 
-# FishLSS
+## Fisher forecasting for Large Scale Structure surveys (FishLSS)
 
 ![Fishing astro](https://github.com/NoahSailer/FishLSS/blob/master/figures/fishing_astro.jpg)
 
+If you make use of this code please cite [(Sailer et al. 2021)](https://inspirehep.net/literature/1869110).
 
-Forecasting code for LSS surveys. Requires numpy, scipy, [pyFFTW](https://hgomersall.github.io/pyFFTW/), and [CLASS_EDE](https://github.com/mwt5345/class_ede): an 
-extension of the Boltzmann code [CLASS](https://github.com/lesgourg/class_public) that includes an Early Dark Energy model.
+Requirements: numpy, scipy, [pyFFTW](https://hgomersall.github.io/pyFFTW/), [velocileptors](https://github.com/sfschen/velocileptors), and [CLASS](https://github.com/lesgourg/class_public). To forecast sensitivity to Early Dark Energy one can optionally install [CLASS_EDE](https://github.com/mwt5345/class_ede). 
 
 
-FishLSS calculates derivatives of both the 3D galaxy power spectrum and CMB 
-lensing auto/cross spectrum, with repsect to any CLASS_EDE parameter, as well
-as several extenions:
+FishLSS calculates derivatives of both the redshift-space galaxy power spectrum and CMB 
+lensing auto/cross spectrum with repsect to any CLASS parameter, in addition to
 
-(1) Primordial features (<img src="https://render.githubusercontent.com/render/math?math=A_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\omega_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\phi_\text{lin}">)
+(1) (linear) Primordial features (<img src="https://render.githubusercontent.com/render/math?math=A_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\omega_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\phi_\text{lin}">)
 
 (2) Non-linear bias parameters (<img src="https://render.githubusercontent.com/render/math?math=b_1">, <img src="https://render.githubusercontent.com/render/math?math=b_2">, <img src="https://render.githubusercontent.com/render/math?math=b_s">) and counterterms (<img src="https://render.githubusercontent.com/render/math?math=\alpha_0">, <img src="https://render.githubusercontent.com/render/math?math=\alpha_2">, <img src="https://render.githubusercontent.com/render/math?math=\alpha_4">)
 
@@ -21,8 +20,7 @@ as several extenions:
 
 -------
 
-Here's an example showing how to create a forecasting object, calculate derivatives,
-and generate a Fisher matrix: 
+Below is a very quick example showing how to create a forecasting object, calculate derivatives of the redshift-space galaxy power spectrum, and generate a Fisher matrix. See notebooks/
 ```
 # import dependencies
 from headers import *
@@ -39,24 +37,21 @@ cosmo = Class()
 cosmo.set(params)
 cosmo.compute()
 
-# Create and experiment, this one observes LBGs from 2 < z < 5, and we split
-# the sample into three z-bins
-exp = experiment(zmin=2., zmax=5., nbins=3, fsky=0.34, sigma_z=0.001, LBG=True)
+# Define an experiment. This one observes LBGs (i.e. an idealized MegaMapper survey) 
+# from 2 < z < 5, and we split the sample into three z-bins
+exp = experiment(zmin=2., zmax=5., nbins=3, fsky=0.34, LBG=True)
 
 # Create the forecast object. 
-fishcast = fisherForecast(experiment=exp,cosmo=cosmo,params=params,
-                          khmin=5.e-4,khmax=1.,Nk=1000,Nmu=200,
-                          velocileptors=True,name='Example')
+fishcast = fisherForecast(experiment=exp,cosmo=cosmo,name='Example')
                           
 # Specify which derivatives to compute 
-basis = np.array(['h','log(A_s)','n_s','omega_cdm'])
-fishcast.marg_params = basis
+basis = np.array(['h','log(A_s)','n_s','omega_cdm','b'])
+fishcast.free_params = basis
 
 # Compute derivatives, automatically saves to output/Example/derivatives
 fishcast.compute_derivatives()
 
-# Load derivatives and compute Fisher matrix
-second_basis = np.array(['h','n_s'])
-derivatives = fishcast.load_derivatives(second_basis)
-F = fishcast.gen_fisher(second_basis, kmax_knl = 0.5, derivatives=derivatives)
+# Compute (small) Fisher matrix with kmax = knl (k_{non-linear})
+fisher_basis = np.array(['h','n_s'])
+F = fishcast.gen_fisher(fisher_basis, kmax_knl = 1)
 ```

@@ -42,8 +42,16 @@ def compute_covariance_matrix(fishcast, zbin_index, nratio=1):
    return np.maximum(C,1e-50) # avoiding numerical nonsense with possible 0's
 
 
-def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO'):
+def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO',fsky_CMB=0.4,fsky_intersect=None):
    '''
+   Returns a covariance matrix Cov[X,Y] as a function of l. X (and Y) is in the basis
+   
+        X \in {k-k, k-g1, ..., k-gn, g1-g1, ..., gn-gn}   (the basis has dimension 2*n+1)
+   
+   where g1 is the galaxies in the first redshift bin, k-gi is the cross-correlation of
+   the CMB kappa map and the galaxies in the i'th bin, and so on.
+   
+   This function returns a numpy.array with shape (2*n+1,2*n+1,len(l)), where l = fishcast.l
    '''
    n = fishcast.experiment.nbins
    zs = fishcast.experiment.zcenters
@@ -69,37 +77,37 @@ def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO'):
    constraint = np.ones((n,len(l)))
    idx = np.array([np.where(l)[0] >= ellmax for ellmax in ellmaxs])
    for i in range(n): constraint[i][idx[i]] *= 1e10
-   # build covariance matrix
+   # relevant fsky's
+   fsky_LSS = fishcast.experiment.fsky
+   if fsky_intersect is None: fsky_intersect = min(fsky_LSS,fsky_CMB)  # full-overlap by default
+   # "empty" covariance matrix
    C = np.zeros((2*n+1,2*n+1,len(l)))
-   fsky = min(fishcast.experiment.fsky,0.4)
-   #
+   # kk,kk component of covariance
    Ckk = fishcast.Ckk_fid
-   # kk, kk
-   C[0,0] = 2*(Ckk + Nkk)**2/(2*l+1)
+   C[0,0] = 2*(Ckk + Nkk)**2/(2*l+1) / fsky_CMB
+   #
    for i in range(n):
-      Ckgi = fishcast.Ckg_fid[i]
+      Ckgi = fishcast.Ckg_fid[i] 
+      Cgigi = fishcast.Cgg_fid[i]
       # kk, kg
-      C[i+1,0] = 2*(Ckk + Nkk) * Ckgi/(2*l+1)*constraint[i]
+      C[i+1,0] = 2*(Ckk + Nkk) * Ckgi/(2*l+1)*constraint[i] * fsky_intersect / fsky_LSS / fsky_CMB
       C[0,i+1] = C[i+1,0]
       # kk, gg
-      C[i+1+n,0] = 2*Ckgi**2/(2*l+1)*constraint[i]
+      C[i+1+n,0] = 2*Ckgi**2/(2*l+1)*constraint[i] * fsky_intersect / fsky_LSS / fsky_CMB
       C[0,i+1+n] = C[i+1+n,0]
       for j in range(n):
          Ckgj = fishcast.Ckg_fid[j]
-         Cgigi = fishcast.Cgg_fid[i]
          Cgjgj = fishcast.Cgg_fid[j]
          # kgi, kgj
          C[i+1,j+1] = Ckgi*Ckgj*constraint[i]*constraint[j]
          if i == j: C[i+1,j+1] += (Ckk + Nkk)*Cgigi*constraint[i]
-         C[i+1,j+1] /= 2*l+1
+         C[i+1,j+1] /= (2*l+1) * fsky_LSS
          # gigi, gjgj
-         if i == j: C[i+1+n,j+1+n] = 2*Cgigi**2 / (2*l+1)*constraint[i]
+         if i == j: C[i+1+n,j+1+n] = 2*Cgigi**2 / (2*l+1)*constraint[i] / fsky_LSS
          # kgi, gjgj
          if i == j: 
-            C[i+1,i+1+n] = 2*Cgigi*Ckgi/(2*l+1)*constraint[i]
+            C[i+1,i+1+n] = 2*Cgigi*Ckgi/(2*l+1)*constraint[i] / fsky_LSS
             C[i+1+n,i+1] = C[i+1,i+1+n]
-   C /= fsky
-   C[0,0] *= fsky/0.4
    return C
       
 
