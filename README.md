@@ -6,17 +6,20 @@
 
 If you make use of this code please cite [(Sailer et al. 2021)](https://inspirehep.net/literature/1869110).
 
-Requirements: numpy, scipy, [pyFFTW](https://hgomersall.github.io/pyFFTW/), [velocileptors](https://github.com/sfschen/velocileptors), and [CLASS](https://github.com/lesgourg/class_public). To forecast sensitivity to Early Dark Energy one can optionally install [CLASS_EDE](https://github.com/mwt5345/class_ede). 
+-------
 
+Requirements: numpy, scipy, [pyFFTW](https://hgomersall.github.io/pyFFTW/), [velocileptors](https://github.com/sfschen/velocileptors), and [CLASS](https://github.com/lesgourg/class_public). To forecast sensitivity to Early Dark Energy one can optionally install [CLASS_EDE](https://github.com/mwt5345/class_ede). (and similarly for any other modified version of CLASS)
+
+-------
 
 FishLSS calculates derivatives of both the redshift-space galaxy power spectrum and CMB 
 lensing auto/cross spectrum with repsect to any CLASS parameter, in addition to
 
-(1) (linear) Primordial features (<img src="https://render.githubusercontent.com/render/math?math=A_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\omega_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\phi_\text{lin}">)
+(1) Bias parameters, counterterms and stochastic contributions (<img src="https://render.githubusercontent.com/render/math?math=b">, <img src="https://render.githubusercontent.com/render/math?math=b_2">, <img src="https://render.githubusercontent.com/render/math?math=b_s">, <img src="https://render.githubusercontent.com/render/math?math=\alpha_{2n}">, <img src="https://render.githubusercontent.com/render/math?math=\alpha_{x}">, <img src="https://render.githubusercontent.com/render/math?math=N_{2n}">)
 
-(2) Non-linear bias parameters (<img src="https://render.githubusercontent.com/render/math?math=b_1">, <img src="https://render.githubusercontent.com/render/math?math=b_2">, <img src="https://render.githubusercontent.com/render/math?math=b_s">) and counterterms (<img src="https://render.githubusercontent.com/render/math?math=\alpha_0">, <img src="https://render.githubusercontent.com/render/math?math=\alpha_2">, <img src="https://render.githubusercontent.com/render/math?math=\alpha_4">)
+(2) (linear) Primordial features (<img src="https://render.githubusercontent.com/render/math?math=A_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\omega_\text{lin}">, <img src="https://render.githubusercontent.com/render/math?math=\phi_\text{lin}">)
 
-(3) Primordial non-Gaussinity (local <img src="https://render.githubusercontent.com/render/math?math=f_\text{NL}"> through its effect on the linear bias parameter)
+(3) Primordial non-Gaussinity (local <img src="https://render.githubusercontent.com/render/math?math=f_\text{NL}"> through its effect on scale dependent bias, assuming <img src="https://render.githubusercontent.com/render/math?math=b_\phi = 2 \delta_c(b-1)">)
 
 -------
 
