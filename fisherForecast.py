@@ -1171,7 +1171,7 @@ class fisherForecast(object):
       return sum(I*dV) 
     
     
-   def Nmodes_fixed_k(self,k,zmin,zmax,nbins,Deltak=0.1):
+   def Nmodes_fixed_k(self,k,zmin,zmax,nbins,Deltak=0.1,alpha0=-1,alpha2=0,kmin=0.001):
     
       def G(z):
          Sigma2 = self.Sigma2(z)
@@ -1183,8 +1183,9 @@ class fisherForecast(object):
          f = self.cosmo.scale_independent_growth_factor_f(z)      
          K,MU,b = self.k,self.mu,compute_b(self,z)
          P_L = compute_matter_power_spectrum(self,z,linear=True) * (b+f*MU**2.)**2.
-         P_F = compute_tracer_power_spectrum(self,z)
+         P_F = compute_tracer_power_spectrum(self,z,alpha0=alpha0,alpha2=alpha2)
          integrand = ( G(z)**2. * P_L / P_F )**2. 
+         integrand *= self.compute_wedge(z,kmin=kmin) 
          integrand *= self.k**2. * Deltak * self.dmu / (2. * np.pi**2.)
          # we are dividing by 2 pi^2 (and not 4 pi^2) since we integrate from mu = 0 to 1
          ks = self.k.reshape((self.Nk,self.Nmu))[:,0]

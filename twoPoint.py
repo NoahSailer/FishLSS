@@ -316,7 +316,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    b2_fid = 8*(b_fid-1)/21
    bs_fid = -2*(b_fid-1)/7
    if zmid < 6:
-      alpha0_fid = 1.22 + 0.24*b**2*(zmid-5.96) 
+      alpha0_fid = 1.22 + 0.24*b_fid**2*(zmid-5.96) 
    else: 
       alpha0_fid = 0. 
    N_fid = 1/compute_n(fishcast,zmid)
