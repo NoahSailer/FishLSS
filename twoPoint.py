@@ -153,7 +153,8 @@ def get_smoothed_p(fishcast,z,klin,plin,division_factor=2.):
 def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1, 
                                   alpha0=-1, alpha2=0, alpha4=0.,alpha6=0.,
                                   N=None,N2=-1,N4=0.,f=-1., A_lin=-1., 
-                                  omega_lin=-1., phi_lin=-1.,kIR=0.2,     
+                                  omega_lin=-1., phi_lin=-1.,A_log=-1., 
+                                  omega_log=-1., phi_log=-1.,kIR=0.2,     
                                   moments=False,bL1=None,bL2=None,bLs=None,
                                   one_loop=True):
    '''
@@ -173,6 +174,9 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    if A_lin == -1.: A_lin = fishcast.A_lin
    if omega_lin == -1.: omega_lin = fishcast.omega_lin
    if phi_lin == -1.: phi_lin = fishcast.phi_lin 
+   if A_log == -1.: A_log = fishcast.A_log
+   if omega_log == -1.: omega_log = fishcast.omega_log
+   if phi_log == -1.: phi_log = fishcast.phi_log 
    if alpha0 == -1 and exp.alpha0 is None: 
       if z < 6:
          alpha0 = 1.22 + 0.24*b**2*(z-5.96) 
@@ -191,7 +195,9 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    h = fishcast.params['h']
    klin = np.array([K[i*fishcast.Nmu] for i in range(fishcast.Nk)])
    plin = np.array([fishcast.cosmo.pk_cb_lin(k*h,z)*h**3. for k in klin]) 
-   plin *= (1. + A_lin * np.sin(omega_lin * klin + phi_lin))
+   prim_feat_fac =  1. + A_lin * np.sin(omega_lin * klin + phi_lin)
+   prim_feat_fac += A_log * np.sin(omega_log * np.log(klin*h/0.05)  + phi_log)
+   plin *= prim_feat_fac
 
    if fishcast.smooth: plin = get_smoothed_p(fishcast,z)
     

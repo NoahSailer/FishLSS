@@ -30,13 +30,15 @@ class fisherForecast(object):
                 A_lin=0., 
                 omega_lin=0.01, 
                 phi_lin=np.pi/2., 
+                A_log=0., 
+                omega_log=0.01, 
+                phi_log=np.pi/2., 
                 velocileptors=True,
                 linear=False, 
                 linear2=False,
                 name='toy_model',
                 smooth=False,
                 AP=True,
-                recon=False,
                 ell=np.arange(10,1000,1),
                 N2cut=0.2,
                 setup=True,
@@ -59,6 +61,9 @@ class fisherForecast(object):
       self.A_lin = A_lin 
       self.omega_lin = omega_lin
       self.phi_lin = phi_lin
+      self.A_log = A_log 
+      self.omega_log = omega_log
+      self.phi_log = phi_log
       #
       self.velocileptors = velocileptors
       self.linear = linear
@@ -66,7 +71,7 @@ class fisherForecast(object):
       self.name = name
       self.smooth = smooth
       self.AP = AP
-      self.recon = recon
+      self.recon = False
       self.ell = ell
       self.N2cut = N2cut
       self.basedir = basedir
@@ -433,7 +438,7 @@ class fisherForecast(object):
       if param == 'N2' and not self.linear2: return self.k**2*self.mu**2
       if param == 'N4': return self.k**4*self.mu**4
     
-      default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002}
+      default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002,'A_log':0.002}
         
       if relative_step == -1.: 
          try: relative_step = default_step[param]
@@ -462,7 +467,8 @@ class fisherForecast(object):
                    'bs':-2*(b_fid-1)/7,'alpha0':alpha0_fid, 'alpha2':0,
                    'alpha4':0., 'alpha6':0, 'N':N_fid, 'N2':N2_fid, 'N4':0.,
                    'f':-1, 'A_lin':self.A_lin, 'omega_lin':self.omega_lin,
-                   'phi_lin':self.phi_lin,'kIR':0.2}
+                   'phi_lin':self.phi_lin,'A_log':self.A_log, 
+                   'omega_log':self.omega_log,'phi_log':self.phi_log,'kIR':0.2}
     
       if self.experiment.HI: kwargs['N'] = noise # ignores thermal HI noise in deriavtives
     
@@ -679,7 +685,7 @@ class fisherForecast(object):
                     relative_step=-1., absolute_step=-1., five_point=False):
       '''
       '''
-      default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002}
+      default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002,'A_log':0.002}
         
       if relative_step == -1.: 
          try: relative_step = default_step[param]
@@ -821,6 +827,7 @@ class fisherForecast(object):
          for i,p in enumerate(parameters):
             if p == 'fEDE': filename = 'fEDE_'+str(int(1000.*self.log10z_c))+'_'+str(int(100*z[i]))+'.txt'
             elif p == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z[i]))+'.txt'
+            elif p == 'A_log': filename = 'A_log_'+str(int(100.*self.omega_log))+'_'+str(int(100*z[i]))+'.txt'
             else: filename = p+'_'+str(int(100*z[i]))+'.txt'
             folder = '/derivatives/'
             if self.recon: folder = '/derivatives_recon/'
@@ -836,6 +843,7 @@ class fisherForecast(object):
          for free_param in self.free_params:
             if free_param == 'fEDE': filename = 'fEDE_'+str(int(1000.*self.log10z_c))+'_'+str(int(100*z))+'.txt'
             elif free_param == 'A_lin': filename = 'A_lin_'+str(int(100.*self.omega_lin))+'_'+str(int(100*z))+'.txt'
+            elif free_param == 'A_log': filename = 'A_log_'+str(int(100.*self.omega_log))+'_'+str(int(100*z))+'.txt'
             else: filename = free_param+'_'+str(int(100*z))+'.txt'
             folder = '/derivatives/'
             if self.recon: folder = '/derivatives_recon/'
@@ -911,7 +919,7 @@ class fisherForecast(object):
             print(file)
             
             
-   def load_derivatives(self, basis, log10z_c=-1.,omega_lin=-1,polys=True):
+   def load_derivatives(self, basis, log10z_c=-1.,omega_lin=-1,omega_log=-1,polys=True):
       '''
       Let basis = [p1, p2, ...], and denote the centers of the
       redshift bins by z1, z2, ... This returns a matrix of the
@@ -926,6 +934,7 @@ class fisherForecast(object):
       '''
       if log10z_c == -1. : log10z_c = self.log10z_c  
       if omega_lin == -1. : omega_lin = self.omega_lin
+      if omega_log == -1. : omega_log = self.omega_log
         
       nbins = self.experiment.nbins
       N = len(basis)
@@ -940,6 +949,7 @@ class fisherForecast(object):
          for i,param in enumerate(basis):
             if param == 'fEDE': filename = 'fEDE_'+str(int(1000.*log10z_c))+'_'+str(int(100*z))+'.txt'
             elif param == 'A_lin': filename = 'A_lin_'+str(int(100.*omega_lin))+'_'+str(int(100*z))+'.txt'
+            elif param == 'A_log': filename = 'A_log_'+str(int(100.*omega_log))+'_'+str(int(100*z))+'.txt'
             else: filename = param+'_'+str(int(100*z))+'.txt'
             try:
                dPdp = np.genfromtxt(directory+filename)
@@ -997,7 +1007,7 @@ class fisherForecast(object):
       return F
 
 
-   def gen_fisher(self,basis,globe,log10z_c=-1.,omega_lin=-1.,kmax_knl=1.,
+   def gen_fisher(self,basis,globe,log10z_c=-1.,omega_lin=-1.,omega_log=-1.,kmax_knl=1.,
                   kmin=0.003,kmax=-10.,kpar_min=-1.,mu_min=-1,derivatives=None,
                   zbins=None,polys=True,simpson=False,nratio=1.):
       '''
@@ -1005,9 +1015,11 @@ class fisherForecast(object):
       '''
       if log10z_c == -1. : log10z_c = self.log10z_c
       if omega_lin == -1. : omega_lin = self.omega_lin
+      if omega_log == -1. : omega_log = self.omega_log
         
       if derivatives is None: derivatives = self.load_derivatives(basis,log10z_c=log10z_c,
-                                                                  omega_lin=omega_lin,polys=polys)   
+                                                                  omega_lin=omega_lin,
+                                                                  omega_log=omega_log,polys=polys)   
       if zbins is None: zbins = range(self.experiment.nbins)
            
       def fish(zbin_index):

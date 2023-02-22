@@ -340,11 +340,11 @@ def HI_shot(z):
    return 1e-10
 
 
-def HIneff(fishcast,z):
+def HIneff(fishcast,z,old=True):
    '''
    Effective number density for PUMA. Returns
    an array of length Nk*Nmu.
    '''
-   therm = HI_therm(fishcast,z)(fishcast.k,fishcast.mu)
+   therm = HI_therm(fishcast,z,old=old)(fishcast.k,fishcast.mu)
    shot = HI_shot(z)
    return 1./(therm+shot)
