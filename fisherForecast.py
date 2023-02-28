@@ -2,8 +2,6 @@ from headers import *
 from twoPoint import *
 from twoPointNoise import *
 from castorina import castorinaBias,castorinaPn
-from multiprocessing import Pool
-from functools import partial
 import os, json
 from os.path import exists
 
@@ -57,7 +55,7 @@ class fisherForecast(object):
       self.log10z_c = log10z_c
       self.thetai_scf = thetai_scf
       #
-      # parameters for primordial wiggles
+      # parameters for primordial features
       self.A_lin = A_lin 
       self.omega_lin = omega_lin
       self.phi_lin = phi_lin
@@ -83,13 +81,14 @@ class fisherForecast(object):
       dk = np.array(dk)
       self.k = np.repeat(k,self.Nmu)
       self.dk = np.repeat(dk,self.Nmu)
-      #
       mu = np.linspace(0.,1.,self.Nmu)
       dmu = list(mu[1:]-mu[:-1])
       dmu.append(dmu[-1])
       dmu = np.array(dmu)
       self.mu = np.tile(mu,self.Nk)
       self.dmu = np.tile(dmu,self.Nk)
+      
+      self.custom_steps = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002,'A_log':0.002}
 
       # we set these up later
       self.experiment = None     # 
@@ -370,6 +369,34 @@ class fisherForecast(object):
       return np.sum(pls_repeat*legendre_polys,axis=0)
       
       
+   def Sigma2(self, z): return sum(compute_matter_power_spectrum(self,z,linear=True)*self.dk*self.dmu) / (6.*np.pi**2.)
+
+    
+   def kmax_constraint(self, z, kmax_knl=1.): return self.k < kmax_knl/np.sqrt(self.Sigma2(z))
+    
+    
+   def compute_wedge(self, z, kmin=0.003):
+      '''
+      Returns the foreground wedge. If not an HI experiment, just returns a kmin constraint.
+      The object that is returned is an array of bools of length Nk*Nmu.
+      '''
+      if not self.experiment.HI: return self.k > kmin
+      #
+      kparallel = self.k*self.mu
+      kperpendicular = self.k*np.sqrt(1.-self.mu**2.)
+      #
+      chi = (1.+z)*self.cosmo.angular_distance(z)*self.params['h'] # Mpc/h
+      Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] # h km / s Mpc
+      c = 299792.458 # km/s
+      lambda21 = 0.21 * (1+z) # meters
+      D_eff = self.experiment.D * np.sqrt(0.7) # effective dish diameter, in meters
+      theta_w = self.experiment.N_w * 1.22 * lambda21 / (2.*D_eff)
+      #
+      wedge = kparallel > chi*Hz*np.sin(theta_w)*kperpendicular/(c*(1.+z))
+      kparallel_constraint = kparallel > self.experiment.kparallel_min
+      return wedge*kparallel_constraint
+      
+      
    def dPdk(self,P):
       '''
       Given an input array P (length Nk*Nmu), which is 
@@ -405,7 +432,7 @@ class fisherForecast(object):
       defined on the (flattened) k-mu grid, returns 
       dPdmu on that same grid. 
       
-      ssumes that mu is lin spaced
+      assumes that mu is lin spaced
       '''
       P_reshaped = P.reshape((self.Nk,self.Nmu)) 
       P_low  = np.roll(P_reshaped,1,axis=1)
@@ -424,31 +451,80 @@ class fisherForecast(object):
       dP[:,-5:] = dP_low[:,-5:] 
       dmu = self.mu[1] - self.mu[0]
       return dP.flatten()/dmu
-    
-    
-   def compute_dPdp(self, param, z, relative_step=-1., absolute_step=-1., 
-                    one_sided=False, five_point=False,kwargs=None):
+      
+      
+   def get_steps(self, param, default_value, relative_step, absolute_step):
       '''
-      Calculates the derivative of the galaxy power spectrum
-      with respect to the input parameter around the fidicual
-      cosmology and redshift. Returns an array of length Nk*Nmu.
+      Helper function for compute_dPdp and compute_dCdp.
+      Returns the values for which the derivative 'stencil'
+      should be evaluated.
       '''
+      # CLASS takes a string as an input when there is more than one massive neutrino.
+      # If the absolute step size is 0.02 eV, and '0.01,0.05' is the default neutrino mass,
+      # then the code below sets up = '0.02,0.06', and so on.
+      if param == 'm_ncdm' and self.params['N_ncdm']>1:
+         default_value_float = np.array(list(map(float,list(default_value.split(',')))))
+         Mnu = sum(default_value_float)
+         single_step = relative_step*Mnu/self.params['N_ncdm']
+         new_value = lambda stp: ','.join(list(map(str,list(default_value_float+stp))))
+         up =       new_value(single_step)
+         upup =     new_value(2.*single_step)
+         down =     new_value(-single_step)
+         downdown = new_value(-2.*single_step)
+         step = Mnu*relative_step
+      # If varying anything other than the neutrino mass, then the parameter
+      # value is assumed to be a single float. Absolute step sizes are used 
+      # when the default parameter value is zero.
+      elif default_value == 0.:
+         up =       default_value + absolute_step
+         upup =     default_value + 2.*absolute_step
+         down =     default_value - absolute_step
+         downdown = default_value - 2.*absolute_step
+         step = absolute_step 
+      else:
+         up =       default_value * (1. + relative_step)
+         upup =     default_value * (1. + 2.*relative_step)
+         down =     default_value * (1. - relative_step)
+         downdown = default_value * (1. - 2.*relative_step)
+         step = default_value * relative_step
+      return up,upup,down,downdown,step
+      
     
+   def compute_dPdp(self, param, z, one_sided=False, five_point=False):
+      '''
+      Calculates the derivative of the tracer power spectrum at 
+      redshift z with respect to the input parameter around the 
+      fidicual cosmology. Returns an array of length Nk*Nmu.
+      
+      Defaults to a two sided approximation:
+                   df/dx = (f(x+e) - f(x-e)) / 2 e      (1)
+      where e is the step size.
+      
+      By default e = 0.01 * (the fiducial value of param), or 
+      e = 0.01 when (the fiducial value of param) = 0. Custom 
+      step sizes can be set with self.custom_steps.
+      ----------------------------------------------------------
+      - param (string): input parameter 
+      
+      - z (float): redshift 
+      
+      - one_sided (boolean, default False): replace Eq. (1) with
+      
+      df/dx = (-3 f(x+4e) + 16 f(x+3e) - 36 f(x+2e) + 48 f(x+e) - 25 f(x)) / 12 e
+           
+      - five_point (boolean, default False): replace Eq. (1) with
+      
+      df/dx = (-f(x+2e) + 8 f(x+e) - 8 f(x-e) + f(x-2e)) / 12 e
+      '''
+      ### These derivatives are computed analytically.
       if param == 'N' : return np.ones(self.k.shape)
       if param == 'N2' and not self.linear2: return self.k**2*self.mu**2
       if param == 'N4': return self.k**4*self.mu**4
-    
-      default_step = {'tau_reio':0.3,'m_ncdm':0.05,'A_lin':0.002,'A_log':0.002}
-        
-      if relative_step == -1.: 
-         try: relative_step = default_step[param]
-         except: relative_step = 0.01
-      if absolute_step == -1.: 
-         try: absolute_step = default_step[param]
-         except: absolute_step = 0.01
-
+      # Fiucial P(k,mu,z) parameters  
+      
+      ##########################################################################
+      
       b_fid = compute_b(self,z)    
-      f_fid = self.cosmo.scale_independent_growth_factor_f(z)  
       if z < 6 and self.experiment.alpha0 is None:
          alpha0_fid = 1.22 + 0.24*b_fid**2*(z-5.96)
       elif self.experiment.alpha0 is None:
@@ -461,57 +537,15 @@ class fisherForecast(object):
       if self.experiment.HI: noise = castorinaPn(z)
       sigv = self.experiment.sigv
       N2_fid = -noise*((1+z)*sigv/Hz)**2.
-                    
-      if kwargs is None: 
-         kwargs = {'fishcast':self, 'z':z, 'b':b_fid, 'b2':8*(b_fid-1)/21,
-                   'bs':-2*(b_fid-1)/7,'alpha0':alpha0_fid, 'alpha2':0,
-                   'alpha4':0., 'alpha6':0, 'N':N_fid, 'N2':N2_fid, 'N4':0.,
-                   'f':-1, 'A_lin':self.A_lin, 'omega_lin':self.omega_lin,
-                   'phi_lin':self.phi_lin,'A_log':self.A_log, 
-                   'omega_log':self.omega_log,'phi_log':self.phi_log,'kIR':0.2}
-    
-      if self.experiment.HI: kwargs['N'] = noise # ignores thermal HI noise in deriavtives
-    
-      if param in kwargs or param == 'f_NL': 
-         fNL_flag = False
-         if param == 'f_NL': 
-            param = 'b' ; fNL_flag = True
-         if param == 'f': default_value = f_fid
-         else: default_value = kwargs[param]
-         #
-         up = default_value*(1+relative_step)
-         if default_value == 0: up = absolute_step
-         down = default_value*(1-relative_step)
-         if default_value == 0: down = -absolute_step
-         upup = default_value*(1+2*relative_step)
-         if default_value == 0: upup = 2*absolute_step
-         downdown = default_value*(1-2*relative_step)
-         if default_value == 0: downdown = -2*absolute_step
-         step = up - default_value
-         kwargs[param] = up
-         P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
-         kwargs[param] = down
-         P_dummy_low = compute_tracer_power_spectrum(**kwargs)
-         if five_point:
-            kwargs[param] = upup
-            P_dummy_higher = compute_tracer_power_spectrum(**kwargs)
-            kwargs[param] = downdown
-            P_dummy_lower = compute_tracer_power_spectrum(**kwargs)
-         kwargs[param] = default_value
-         if five_point: dPdtheta = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
-         else: dPdtheta = (P_dummy_hi - P_dummy_low) / (2. * step)
-         if fNL_flag:
-            D = 0.76 * self.cosmo.scale_independent_growth_factor(z) # normalized so D(a) = a in the MD era
-            # brute force way of getting the transfer function, normalized to 1 at kmin
-            pmatter = compute_matter_power_spectrum(self, z, linear=True)
-            T = np.sqrt(pmatter/self.k**self.params['n_s'])
-            T /= T[0]
-            fNL_factor = 3.*1.68*(b_fid-1.)*((self.params['omega_cdm']+self.params['omega_b'])/\
-                                              self.params['h']**2.)*100.**2.
-            fNL_factor /= D * self.k**2. * T * 299792.458**2.
-            dPdtheta *= fNL_factor
-         return dPdtheta
-       
+
+      kwargs = {'fishcast':self, 'z':z, 'b':b_fid, 'b2':8*(b_fid-1)/21,
+                'bs':-2*(b_fid-1)/7,'alpha0':alpha0_fid, 'alpha2':0,
+                'alpha4':0., 'alpha6':0, 'N':N_fid, 'N2':N2_fid, 'N4':0.,
+                'f':-1, 'A_lin':self.A_lin, 'omega_lin':self.omega_lin,
+                'phi_lin':self.phi_lin,'A_log':self.A_log, 
+                'omega_log':self.omega_log,'phi_log':self.phi_log,'kIR':0.2}
+      # ignore thermal 21cm noise in deriavtives      
+      if self.experiment.HI: kwargs['N'] = noise 
       P_fid = compute_tracer_power_spectrum(**kwargs) 
         
       if param == 'norm': return 2*P_fid  
@@ -521,163 +555,107 @@ class fisherForecast(object):
          Ohi = 4e-4*(1+z)**0.6
          Tb = 188e-3*(self.params['h'])/Ez*Ohi*(1+z)**2
          return 2. * ( P_fid - noise  + castorinaPn(z)) / Tb  
+      
+      ##########################################################################
+      
+      ### The remaining derivatives are calculated numerically.
+      # Get the step size
+      try: 
+         relative_step = self.custom_steps[param]
+         absolute_step = self.custom_steps[param]
+      except: 
+         relative_step = 0.01
+         absolute_step = 0.01
+      
+      def set_param(value,compute=True):
+         if param in kwargs: 
+            kwargs[param] = value
+            if not compute: return None
+            return compute_tracer_power_spectrum(**kwargs), 1., 1.
+         self.cosmo.set({param : value})
+         self.cosmo.compute()
+         h = self.params['h']
+         c = 299792.458
+         if compute:
+            P = compute_tracer_power_spectrum(**kwargs)
+            aperp = self.cosmo.angular_distance(z)*h/self.Da_fid(z)
+            apar  = self.Hz_fid(z)/(self.cosmo.Hubble(z)*c/h)
+            return P, aperp, apar
 
-      if param == 'alpha_parallel':
+      def AP_effect(daperpdp,dapardp):
          K,MU = self.k,self.mu
-         return -P_fid - MU*(1-MU**2)*self.dPdmu(P_fid) - K*MU**2*self.dPdk(P_fid)
-        
-      if param == 'alpha_perp':
-         K,MU = self.k,self.mu
-         return -2*P_fid + MU*(1-MU**2)*self.dPdmu(P_fid) - K*(1-MU**2)*self.dPdk(P_fid)       
-            
-      def one_sided_deriv(param,step):  
-         self.cosmo.set({param:step})
-         self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
-         ap0_hi = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         ap1_hi = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
-         #
-         self.cosmo.set({param:2.*step})
-         self.cosmo.compute()
-         P_dummy_hi2 = compute_tracer_power_spectrum(**kwargs)
-         ap0_hi2 = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         ap1_hi2 = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
-         #
-         self.cosmo.set({param:3.*step})
-         self.cosmo.compute()
-         P_dummy_hi3 = compute_tracer_power_spectrum(**kwargs)
-         ap0_hi3 = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         ap1_hi3 = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
-         #
-         self.cosmo.set({param:4.*step})
-         self.cosmo.compute()
-         P_dummy_hi4 = compute_tracer_power_spectrum(**kwargs)
-         ap0_hi4 = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         ap1_hi4 = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] / self.Hz_fid(z)
-         #
+         res = -(dapardp+2*daperpdp)*P_fid
+         res -= MU*(1-MU**2)*(dapardp-daperpdp)*self.dPdmu(P_fid)
+         res -= K*(dapardp*MU**2 + daperpdp*(1-MU**2))*self.dPdk(P_fid)
+         return res
+       
+      if param == 'alpha_parallel': return AP_effect(0.,1.)
+      if param == 'alpha_perp': return AP_effect(1.,0.)    
+      
+      def one_sided_deriv(param,step,fid=0.):  
+         P_dummy_hi, aperp_hi, apar_hi = set_param(fid+step)
+         P_dummy_hi2, aperp_hi2, apar_hi2 = set_param(fid+2.*step)
+         P_dummy_hi3, aperp_hi3, apar_hi3 = set_param(fid+3.*step)
+         P_dummy_hi4, aperp_hi4, apar_hi4 = set_param(fid+4.*step)
          self.cosmo = Class()
          self.cosmo.set(self.params_fid)
          self.cosmo.compute() 
-         #
-         dap0dp = (-3.*ap0_hi4 + 16.*ap0_hi3 - 36.*ap0_hi2 + 48.*ap0_hi - 25.*1)/(12.*step)
-         dap1dp = (-3.*ap1_hi4 + 16.*ap1_hi3 - 36.*ap1_hi2 + 48.*ap1_hi - 25.*1)/(12.*step)
-         result = (-3.*P_dummy_hi4 + 16.*P_dummy_hi3 - 36.*P_dummy_hi2 + 48.*P_dummy_hi - 25.*P_fid)/(12.*step)
-         K,MU = self.k,self.mu
-         if self.AP: result += (dap1dp-2*dap0dp)*P_fid + MU*(1-MU**2)*(dap1dp+dap0dp)*self.dPdmu(P_fid) +\
-                                K*(dap1dp*MU**2 - dap0dp*(1-MU**2))*self.dPdk(P_fid)
+         stencil = lambda h4,h3,h2,h1,h0: (-3.*h4+16.*h3-36.*h2+48.*h1-25.*h0)/(12.*step)
+         result  = stencil(P_dummy_hi4,P_dummy_hi3,P_dummy_hi2,P_dummy_hi,P_fid)
+         daperpdp = stencil(aperp_hi4,aperp_hi3,aperp_hi2,aperp_hi,1.)
+         dapardp  = stencil(apar_hi4,apar_hi3,apar_hi2,apar_hi,1.)
+         if self.AP: result += AP_effect(daperpdp,dapardp)  
          return result
          
-      # derivative of early dark energy parameters (Hill+2020)
+      # derivative w.r.t. fEDE (early dark energy) 
       if param == 'fEDE' and self.fEDE == 0.:
          EDE_params = {'log10z_c': self.log10z_c,'fEDE': absolute_step,'thetai_scf': self.thetai_scf,
-                       'Omega_Lambda':0.0,'Omega_fld':0,'Omega_scf':-1,
-                       'n_scf':3,'CC_scf':1,'scf_tuning_index':3,
-                       'scf_parameters':'1, 1, 1, 1, 1, 0.0',
-                       'attractor_ic_scf':'no'}
+                       'Omega_Lambda':0.0,'Omega_fld':0,'Omega_scf':-1,'n_scf':3,'CC_scf':1,
+                       'scf_tuning_index':3,'scf_parameters':'1, 1, 1, 1, 1, 0.0','attractor_ic_scf':'no'}
          self.cosmo.set(EDE_params)
          return one_sided_deriv('fEDE',absolute_step)
          
-      if (param == 'log10z_c' or param == 'thetai_scf') and self.fEDE == 0.:
-         print('Attempted to marginalize over log10z_c or thetai_scf when fEDE has a fiducial value of 0.')
-         return
-         
-      if one_sided: return one_sided_deriv(param,absolute_step)
-    
-      result = np.zeros(len(self.k))
-      
       # brute force numerical differentiation
-      flag = False 
-      if param == 'log(A_s)' : 
-         flag = True
-         param = 'A_s'  
-        
-      default_value = self.params[param] 
-        
-      if param == 'm_ncdm' and self.params['N_ncdm']>1:
-         # CLASS takes a string as an input when there is more than one massless neutrino
-         default_value_float = np.array(list(map(float,list(default_value.split(',')))))
-         Mnu = sum(default_value_float)
-         up = ','.join(list(map(str,list(default_value_float+relative_step*Mnu/self.params['N_ncdm']))))
-         upup = ','.join(list(map(str,list(default_value_float+2.*relative_step*Mnu/self.params['N_ncdm']))))
-         down = ','.join(list(map(str,list(default_value_float-relative_step*Mnu/self.params['N_ncdm']))))
-         downdown = ','.join(list(map(str,list(default_value_float-2.*relative_step*Mnu/self.params['N_ncdm']))))
-         step = Mnu*relative_step
-      else:
-         up = default_value * (1. + relative_step)
-         if default_value == 0.: up = default_value + absolute_step
-         upup = default_value * (1. + 2.*relative_step)
-         if default_value == 0.: upup = default_value + 2.*absolute_step
-         down = default_value * (1. - relative_step)
-         if default_value == 0.: down = default_value - absolute_step
-         downdown = default_value * (1. - 2.*relative_step)
-         if default_value == 0.: downdown = default_value - 2.*absolute_step
-         step = default_value * relative_step
-         if default_value == 0.: step = absolute_step
-            
-    
-      def set_param(value):
-         self.cosmo.set({param : value})
-         #self.params[param] = value
-        
-      if five_point:
-         set_param(up)
-         self.cosmo.compute()
-         P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
-         aperp_hi = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         apar_hi = self.Hz_fid(z)/(self.cosmo.Hubble(z)*(299792.458)/self.params['h'])
-         #
-         set_param(upup)
-         self.cosmo.compute()
-         P_dummy_higher = compute_tracer_power_spectrum(**kwargs)
-         aperp_higher = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         apar_higher = self.Hz_fid(z)/(self.cosmo.Hubble(z)*(299792.458)/self.params['h'])
-         #
-         set_param(down)
-         self.cosmo.compute()
-         P_dummy_low = compute_tracer_power_spectrum(**kwargs)
-         aperp_low = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         apar_low = self.Hz_fid(z)/(self.cosmo.Hubble(z)*(299792.458)/self.params['h'])
-         #
-         set_param(downdown)
-         self.cosmo.compute()
-         P_dummy_lower = compute_tracer_power_spectrum(**kwargs)
-         aperp_lower = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-         apar_lower = self.Hz_fid(z)/(self.cosmo.Hubble(z)*(299792.458)/self.params['h'])
-         #
-         set_param(default_value)
-         self.cosmo.compute()
-         #
-         result += (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
-         daperpdp = (-aperp_higher + 8.*aperp_hi - 8.*aperp_low + aperp_lower) / (12. * step)
-         dapardp = (-apar_higher + 8.*apar_hi - 8.*apar_low + apar_lower) / (12. * step)
-         K,MU = self.k,self.mu
-         if self.AP: result += -(dapardp+2*daperpdp)*P_fid - MU*(1-MU**2)*(dapardp-daperpdp)*self.dPdmu(P_fid) -\
-                               K*(dapardp*MU**2 + daperpdp*(1-MU**2))*self.dPdk(P_fid)
-         if flag: result *= self.params['A_s']
-         return result
+      result = np.zeros(len(self.k))
+      As_flag = False ; fNL_flag = False
+      if param == 'log(A_s)': As_flag = True ; param = 'A_s'  
+      if param == 'f_NL': fNL_flag = True ; param = 'b'
+      if param in kwargs: default_value = kwargs[param]
+      else: default_value = self.params_fid[param] 
+      up,upup,down,downdown,step = self.get_steps(param, default_value, relative_step, absolute_step)
+      
+      if one_sided: return one_sided_deriv(param,step,fid=default_value)
 
-      # defaults to a two sided derivative
-      set_param(up)
-      self.cosmo.compute()
-      P_dummy_hi = compute_tracer_power_spectrum(**kwargs)
-      aperp_hi = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-      apar_hi = self.Hz_fid(z)/(self.cosmo.Hubble(z)*(299792.458)/self.params['h']) 
-      #
-      set_param(down)
-      self.cosmo.compute()
-      P_dummy_low = compute_tracer_power_spectrum(**kwargs)
-      aperp_low = self.cosmo.angular_distance(z)*self.params['h'] / self.Da_fid(z) 
-      apar_low = self.Hz_fid(z)/(self.cosmo.Hubble(z)*(299792.458)/self.params['h']) 
-      #
-      set_param(default_value)
-      self.cosmo.compute()
-      result += (P_dummy_hi - P_dummy_low) / (2. * step)
-      daperpdp = (aperp_hi - aperp_low) / (2. * step)
-      dapardp = (apar_hi - apar_low) / (2. * step)
-      K,MU = self.k,self.mu
-      if self.AP: result += -(dapardp+2*daperpdp)*P_fid - MU*(1-MU**2)*(dapardp-daperpdp)*self.dPdmu(P_fid) -\
-                               K*(dapardp*MU**2 + daperpdp*(1-MU**2))*self.dPdk(P_fid)
-      if flag: result *= self.params['A_s']
+      P_dummy_hi, aperp_hi, apar_hi = set_param(up)
+      P_dummy_low, aperp_low, apar_low = set_param(down)
+      if five_point:
+         P_dummy_higher, aperp_higher, apar_higher = set_param(upup)
+         P_dummy_lower, aperp_lower, apar_lower = set_param(downdown)
+      set_param(default_value,compute=False)
+      
+      if five_point:
+         stencil = lambda hh,h,l,ll: (-hh + 8.*h - 8.*l + ll) / (12. * step)
+         result  += stencil(P_dummy_higher,P_dummy_hi,P_dummy_low,P_dummy_lower)
+         daperpdp = stencil(aperp_higher,aperp_hi,aperp_low,aperp_lower)
+         dapardp  = stencil(apar_higher,apar_hi,apar_low,apar_lower)
+         if self.AP: result += AP_effect(daperpdp,dapardp) 
+      else:
+         # defaults to two-sided derivative
+         stencil = lambda h,l: (h-l) / (2. * step)
+         result  += stencil(P_dummy_hi,P_dummy_low)
+         daperpdp = stencil(aperp_hi,aperp_low)
+         dapardp  = stencil(apar_hi,apar_low)
+         if self.AP: result += AP_effect(daperpdp,dapardp)
+
+      if As_flag: result *= self.params['A_s']    
+      if fNL_flag:
+         D = 0.76 * self.cosmo.scale_independent_growth_factor(z) # normalized so D(a) = a in the MD era
+         # brute force way of getting the transfer function, normalized to 1 at kmin
+         pmatter = compute_matter_power_spectrum(self, z, linear=True)
+         T = np.sqrt(pmatter/self.k**self.params['n_s']) ; T /= T[0]
+         fNL_factor = 3.*1.68*(b_fid-1.)*self.cosmo.Om_m(0)*100.**2.
+         fNL_factor /= D * self.k**2. * T * 299792.458**2.
+         result *= fNL_factor
       return result
 
 
@@ -744,7 +722,7 @@ class fisherForecast(object):
       default_value = self.params_fid[param] 
         
       if param == 'm_ncdm' and self.params['N_ncdm']>1:
-         # CLASS takes a string as an input when there is more than one massless neutrino
+         # CLASS takes a string as an input when there is more than one massive neutrino
          default_value_float = np.array(list(map(float,list(default_value.split(',')))))
          Mnu = sum(default_value_float)
          up = ','.join(list(map(str,list(default_value_float+relative_step*Mnu/self.params['N_ncdm']))))
@@ -789,35 +767,7 @@ class fisherForecast(object):
       if flag: result *= self.params['A_s']
       return result
 
-   
-   def Sigma2(self, z): return sum(compute_matter_power_spectrum(self,z,linear=True)*self.dk*self.dmu) / (6.*np.pi**2.)
-
-    
-   def kmax_constraint(self, z, kmax_knl=1.): return self.k < kmax_knl/np.sqrt(self.Sigma2(z))
-    
-    
-   def compute_wedge(self, z, kmin=0.003):
-      '''
-      Returns the foreground wedge. If not an HI experiment, just returns a kmin constraint.
-      The object that is returned is an array of bools of length Nk*Nmu.
-      '''
-      if not self.experiment.HI: return self.k > kmin
-      #
-      kparallel = self.k*self.mu
-      kperpendicular = self.k*np.sqrt(1.-self.mu**2.)
-      #
-      chi = (1.+z)*self.cosmo.angular_distance(z)*self.params['h'] # Mpc/h
-      Hz = self.cosmo.Hubble(z)*(299792.458)/self.params['h'] # h km / s Mpc
-      c = 299792.458 # km/s
-      lambda21 = 0.21 * (1+z) # meters
-      D_eff = self.experiment.D * np.sqrt(0.7) # effective dish diameter, in meters
-      theta_w = self.experiment.N_w * 1.22 * lambda21 / (2.*D_eff)
-      #
-      wedge = kparallel > chi*Hz*np.sin(theta_w)*kperpendicular/(c*(1.+z))
-      kparallel_constraint = kparallel > self.experiment.kparallel_min
-      return wedge*kparallel_constraint
-    
-    
+       
    def compute_derivatives(self, five_point=True, parameters=None, z=None, overwrite=False, one_sided=False):
       '''
       Calculates all the derivatives and saves them to the 
@@ -898,27 +848,7 @@ class fisherForecast(object):
             else:
                continue
             
-            
-   def check_derivatives(self):
-      '''
-      Plots all the derivatives in the output/forecast name/derivatives directory
-      '''
-      directory = self.basedir+'output/'+self.name+'/derivatives'
-      for root, dirs, files in os.walk(directory, topdown=False):
-         for file in files:
-            filename = os.path.join(directory, file)
-            dPdp = np.genfromtxt(filename)
-            plt.figure(figsize=(6,6))
-            k = np.linspace(0.008,1.,1000)
-            plt.semilogx(k,self.get_f_at_fixed_mu(dPdp,0.)(k),color='b')
-            plt.semilogx(k,self.get_f_at_fixed_mu(dPdp,0.3)(k),color='g')
-            plt.semilogx(k,self.get_f_at_fixed_mu(dPdp,0.7)(k),color='r')
-            plt.xlabel(r'$k$ [h/Mpc]')
-            plt.show()
-            plt.clf()
-            print(file)
-            
-            
+                        
    def load_derivatives(self, basis, log10z_c=-1.,omega_lin=-1,omega_log=-1,polys=True):
       '''
       Let basis = [p1, p2, ...], and denote the centers of the

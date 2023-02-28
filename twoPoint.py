@@ -61,8 +61,7 @@ def MSEb(fishcast,z):
 
 def HIb(z): return castorinaBias(z)
  
-#################################################################################################    
-    
+      
 def compute_b(fishcast,z):
    '''
    Quick way of getting the bias. This is what 
@@ -82,17 +81,8 @@ def compute_b(fishcast,z):
 
 #################################################################################################
 #################################################################################################
-# scale-dependent growth rate (I'm not using this function anywhere)
 
-def compute_f(fishcast, z, step=0.01):
-   '''
-   Returns the scale-dependent growth factor.
-   '''
-   p_hi = compute_matter_power_spectrum(fishcast,z=z+step)
-   p_higher = compute_matter_power_spectrum(fishcast,z=z+2.*step)
-   p_fid = compute_matter_power_spectrum(fishcast,z=z)
-   dPdz = (p_fid - (4./3.) * p_hi + (1./3.) * p_higher) / ((-2./3.)*step)
-   return -(1.+z) * dPdz / (2. * p_fid)
+
 
 #################################################################################################
 # functions for calculating P_{mm}(k,mu), P_{gg}(k,mu), P_{XY}(k), C^{XY}_\ell, and the smoothed
