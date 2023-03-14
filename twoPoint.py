@@ -255,8 +255,7 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
     
     
    ######################################################################################################## 
-   if fishcast.linear:
-      print('IMPLEMENT STUFF HERE')
+
     
    if X == Y and X == 'k': 
       plin = np.array([fishcast.cosmo.pk_lin(k*h,z)*h**3. for k in klin])
@@ -265,7 +264,13 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
       kk,pmm = cleft.combine_bias_terms_pk(0,0,0,0,0,0) 
       if z>10: pmm=np.array([fishcast.cosmo.pk(k*h,z)*h**3. for k in klin])
       return interp1d(kk, pmm, kind='linear', bounds_error=False, fill_value=0.)
-    
+      
+   if fishcast.linear:
+      if (X == 'k' and Y == 'g') or (X == 'g' and Y == 'k'):
+         return interp1d(klin, b*plin, kind='linear', bounds_error=False, fill_value=0.)
+      if (X == 'g' and Y == 'g'):
+         return interp1d(klin, b**2*plin, kind='linear', bounds_error=False, fill_value=0.)
+      
    cleft = CLEFT(klin,plin,cutoff=2.)
    cleft.make_ptable(kmin=min(klin),kmax=max(klin),nk=fishcast.Nk)
    
