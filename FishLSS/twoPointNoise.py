@@ -4,6 +4,7 @@ from scipy.interpolate import interp1d
 
 from FishLSS.castorina import castorinaBias,castorinaPn
 from FishLSS.input.reio_hist import Xhi
+from FishLSS import __path__ as FishLSS_path
 
 
 '''
@@ -58,15 +59,15 @@ def covariance_Cls(fishcast,kmax_knl=1.,CMB='SO',fsky_CMB=0.4,fsky_intersect=Non
    zes = fishcast.experiment.zedges
    # Lensing noise
    if CMB == 'SO': 
-      data = np.genfromtxt('input/nlkk_v3_1_0deproj0_SENS2_fsky0p4_it_lT30-3000_lP30-5000.dat')
+      data = np.genfromtxt(FishLSS_path+'/input/nlkk_v3_1_0deproj0_SENS2_fsky0p4_it_lT30-3000_lP30-5000.dat')
       l,N = data[:,0],data[:,7]
    elif CMB == 'Planck': 
-      data = np.genfromtxt('input/nlkk_planck.dat')
+      data = np.genfromtxt(FishLSS_path+'/input/nlkk_planck.dat')
       l,N = data[:,0],data[:,1]
    elif CMB == 'Perfect':
       l,N = fishcast.ell, fishcast.ell*0
    else: 
-      data = np.genfromtxt('input/S4_kappa_deproj0_sens0_16000_lT30-3000_lP30-5000.dat')
+      data = np.genfromtxt(FishLSS_path+'/input/S4_kappa_deproj0_sens0_16000_lT30-3000_lP30-5000.dat')
       l,N = data[:,0],data[:,7]
    
    Nkk_interp = interp1d(l,N,kind='linear',bounds_error=False, fill_value=1)
@@ -314,7 +315,7 @@ def HI_therm(fishcast, z, effic=0.7, hexpack=True, skycoupling=0.9,
    def Nu(k,mu):
       if old: return nofl(l(k,mu),hexpack=hexpack,Nside=Nside,D=D)*lam**2 
       #
-      ll,pi2lnb = np.genfromtxt('input/baseline_bs_44_D_14.txt').T
+      ll,pi2lnb = np.genfromtxt(FishLSS_path+'/input/baseline_bs_44_D_14.txt').T
       nofl_new = interp1d(ll,pi2lnb/2/np.pi/ll,bounds_error=False,fill_value=0)
       result = nofl_new(l(k,mu))*lam**2
       result = np.maximum(result,1e-20)
