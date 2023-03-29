@@ -4,13 +4,26 @@
 
 ![Fishing astro](https://github.com/NoahSailer/FishLSS/blob/master/figures/fishing_astro.jpg)
 
-If you make use of this code please cite [(Sailer et al. 2021)](https://arxiv.org/abs/2106.09713).
+If you make use of this code please cite [this paper](https://arxiv.org/abs/2106.09713).
 
 -------
 
-**Requirements:** the usual [anaconda](https://www.anaconda.com/products/distribution) stuff, [pyFFTW](https://hgomersall.github.io/pyFFTW/), [velocileptors](https://github.com/sfschen/velocileptors), and [CLASS](https://github.com/lesgourg/class_public). To forecast sensitivity to Early Dark Energy one can optionally use [CLASS_EDE](https://github.com/mwt5345/class_ede) instead of the vanilla CLASS (and similarly for any other modified version of CLASS).
+**Requirements:** in addition to the usual [anaconda](https://www.anaconda.com/products/distribution) stuff, ```FishLSS``` requires [pyFFTW](https://hgomersall.github.io/pyFFTW/), [velocileptors](https://github.com/sfschen/velocileptors) and [CLASS](https://github.com/lesgourg/class_public), which can be installed by running
+```
+pip install pyFFTW
+pip install -v git+https://github.com/sfschen/velocileptors
+git clone https://github.com/lesgourg/class_public
+cd class_public
+make clean
+make
+``` 
 
-**Installation:** ```pip install -v git+https://github.com/NoahSailer/FishLSS``` 
+To forecast sensitivity to Early Dark Energy one can optionally install [CLASS_EDE](https://github.com/mwt5345/class_ede) instead of the vanilla ```CLASS``` (and similarly for any other modified version of ```CLASS```).
+
+**Installation:** ```FishLSS``` is now pip-installable! Just run
+```
+pip install -v git+https://github.com/NoahSailer/FishLSS
+```
 -------
 
 **What is ``FishLSS`` good for?**
@@ -36,15 +49,6 @@ With the exception of the CMB lensing convergence power spectrum, which is model
 - (linear) primordial features 
 
 - local primordial non-Gaussianity through its effect on scale dependent bias
-
--------
-
-**Code structure**
-
-```experiment.py``` is used to define the experiment object (redshift range, sky coverage, linear bias, number density, etc.). ```twoPoint.py``` contains all the code relevant for computing power spectra, while ```twoPointNoise.py``` contains all the code relevant for computing covariance matrices. ```fisherForecast.py``` is used to define a forecast object, compute derivatives and Fisher matrices. ```castorina.py``` contains the assumed evolution of the 21cm linear bias. ```headers.py``` is a shorthand piece of code to import everything that one needs to import in e.g. a Jupyter notebook to run ```FishLSS``` and to make aesthetically-pleasing plots (importing ```headers.py``` may cause LaTeX errors when plotting).
-
-CMB fisher matrices, CMB lensing noise curves, and the assumed fiducial reionization history can be found in ```input/```. The directory ```bao_recon/``` contains code to compute the reconstructed power spectrum, which is wrapped in ```twoPoint.py```. 
-
 
 -------
 
