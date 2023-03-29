@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.interpolate import interp1d,interp2d
 from scipy.integrate import quad
+from classy import Class
 
 
 class experiment(object):
