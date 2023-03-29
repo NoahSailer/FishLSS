@@ -4,6 +4,7 @@ from scipy.integrate import simps
 from scipy.interpolate import interp1d
 import os, json
 from os.path import exists
+from classy import Class
 
 from FishLSS.castorina import castorinaBias,castorinaPn
 from FishLSS.twoPoint import *
