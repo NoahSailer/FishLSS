@@ -4,7 +4,8 @@ from scipy.interpolate import interp1d
 
 from FishLSS.castorina import castorinaBias,castorinaPn
 from FishLSS.input.reio_hist import Xhi
-from FishLSS import __path__ as FishLSS_path
+from FishLSS import __path__
+FishLSS_path = __path__[0]
 
 
 '''
