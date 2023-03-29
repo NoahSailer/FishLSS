@@ -1,9 +1,13 @@
-from headers import *
-from twoPoint import *
-from twoPointNoise import *
-from castorina import castorinaBias,castorinaPn
+import numpy as np
+from scipy.special import legendre
+from scipy.integrate import simps
+from scipy.interpolate import interp1d
 import os, json
 from os.path import exists
+
+from FishLSS.castorina import castorinaBias,castorinaPn
+from FishLSS.twoPoint import *
+from FishLSS.twoPointNoise import *
 
 
 class fisherForecast(object):
@@ -99,7 +103,7 @@ class fisherForecast(object):
       self.params = None         # CLASS parameters
     
       # make directories for storing derivatives and fiducial power spectra
-      o,on = 'output/','output/'+self.name+'/'
+      o,on = self.basedir+'output/',self.basedir+'output/'+self.name+'/'
       directories = np.array([o, on, on+'/derivatives/', on+'/derivatives_Cl/', on+'/derivatives_recon/'])
       for directory in directories: 
          if not os.path.exists(directory): os.mkdir(directory)
@@ -349,8 +353,8 @@ class fisherForecast(object):
       p_reshaped = p.reshape((n,m))
       result = np.zeros(n)
       for i in range(n):
-         integrand = (2*l+1)*p_reshaped[i,:]*scipy.special.legendre(l)(mu)
-         result[i] = scipy.integrate.simps(integrand,x=mu)
+         integrand = (2*l+1)*p_reshaped[i,:]*legendre(l)(mu)
+         result[i] = simps(integrand,x=mu)
       return result
       
       
@@ -365,7 +369,7 @@ class fisherForecast(object):
       legendre_polys = pls_repeat.copy()
       for i in range(n): 
          pls_repeat = np.repeat(pls[i],self.Nmu)
-         legendre_polys = scipy.special.legendre(2*i)(self.mu)
+         legendre_polys = legendre(2*i)(self.mu)
       return np.sum(pls_repeat*legendre_polys,axis=0)
       
       
@@ -537,11 +541,16 @@ class fisherForecast(object):
       if self.experiment.HI: noise = castorinaPn(z)
       sigv = self.experiment.sigv
       N2_fid = -noise*((1+z)*sigv/Hz)**2.
-
+      
+      if param == 'f':
+         f = self.cosmo_fid.scale_independent_growth_factor_f(z)
+      else:
+         f=-1
+       
       kwargs = {'fishcast':self, 'z':z, 'b':b_fid, 'b2':8*(b_fid-1)/21,
                 'bs':-2*(b_fid-1)/7,'alpha0':alpha0_fid, 'alpha2':0,
                 'alpha4':0., 'alpha6':0, 'N':N_fid, 'N2':N2_fid, 'N4':0.,
-                'f':-1, 'A_lin':self.A_lin, 'omega_lin':self.omega_lin,
+                'f':f, 'A_lin':self.A_lin, 'omega_lin':self.omega_lin,
                 'phi_lin':self.phi_lin,'A_log':self.A_log, 
                 'omega_log':self.omega_log,'phi_log':self.phi_log,'kIR':0.2}
       # ignore thermal 21cm noise in deriavtives      
@@ -1084,7 +1093,7 @@ class fisherForecast(object):
       return f
     
     
-   def Nmodes(self,zmin,zmax,nbins,kpar=-1.,kmax=-1,alpha0=-1,alpha2=0,linear=False,halofit=False):
+   def Nmodes(self,zmin,zmax,nbins,kpar=-1.,kmax=-1,alpha0=-1,alpha2=0,linear=False,halofit=False,nratio=1.):
     
       def G(z):
          Sigma2 = self.Sigma2(z)
@@ -1096,8 +1105,8 @@ class fisherForecast(object):
          f = self.cosmo.scale_independent_growth_factor_f(z)      
          K,MU,b = self.k,self.mu,compute_b(self,z)
          P_L = compute_matter_power_spectrum(self,z,linear=True) * (b+f*MU**2.)**2.
-         P_F = compute_tracer_power_spectrum(self,z,alpha0=alpha0,alpha2=alpha2)
-         if linear: P_F = P_L + 1/compute_n(self,z)
+         if linear: P_F = P_L + 1/compute_n(self,z)/nratio
+         else: P_F = compute_tracer_power_spectrum(self,z,alpha0=alpha0,alpha2=alpha2)
          if halofit: P_F = compute_matter_power_spectrum(self,z) * (b+f*MU**2.)**2. + 1/compute_n(self,z)
          integrand = ( G(z)**2 * P_L / P_F )**2. 
          integrand *= self.compute_wedge(z) 

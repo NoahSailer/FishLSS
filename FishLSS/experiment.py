@@ -1,4 +1,7 @@
-from headers import *
+import numpy as np
+from scipy.interpolate import interp1d,interp2d
+from scipy.integrate import quad
+
 
 class experiment(object):
    '''
@@ -219,7 +222,7 @@ class experiment(object):
       upper_limit = self.Muv(z,m=m)
       integrand = lambda M: (np.log(10.)/2.5) * self.phi(z) * 10.**( -0.4 * (1.+self.alpha(z)) * (M-self.Muvstar(z)) )*\
                                 np.exp(-10.**(-0.4 * (M-self.Muvstar(z)) ) )
-      return scipy.integrate.quad(integrand, -200, upper_limit)[0]
+      return quad(integrand, -200, upper_limit)[0]
 
    def ELGn(self, z):
       zs = np.array([0.65,0.75,0.85,0.95,1.05,1.15,1.25,1.35,1.45,1.55,1.65])
@@ -301,7 +304,7 @@ class experiment(object):
          result *= efficiency(z,m)
          return result
       #
-      n = lambda m: scipy.integrate.quad(integrand, -200, self.Muv(z,m=m))[0]
+      n = lambda m: quad(integrand, -200, self.Muv(z,m=m))[0]
       return n(m)
 
 

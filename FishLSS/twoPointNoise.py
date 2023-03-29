@@ -1,9 +1,8 @@
-from headers import *
-from twoPoint import *
-import twoPoint
-from castorina import castorinaBias,castorinaPn
-import scipy
-from input.reio_hist import Xhi
+import numpy as np
+from scipy.integrate import quad
+
+from FishLSS.castorina import castorinaBias,castorinaPn
+from FishLSS.input.reio_hist import Xhi
 
 
 '''
@@ -154,7 +153,7 @@ def LBGn(fishcast, z, m=24.5):
    integrand = lambda M: (np.log(10.)/2.5) * phi(z) * 10.**( -0.4 * (1.+alpha(z)) * (M-Muvstar(z)) )*\
                              np.exp(-10.**(-0.4 * (M-Muvstar(z)) ) )
    
-   return scipy.integrate.quad(integrand, -200, upper_limit)[0]
+   return quad(integrand, -200, upper_limit)[0]
 
 
 def ELGn(fishcast, z):
@@ -246,7 +245,7 @@ def MSEn(fishcast,z,m=24.5):
       result *= efficiency(z,m)
       return result
    #
-   n = lambda m: scipy.integrate.quad(integrand, -200, Muv(fishcast,z,m=m))[0]
+   n = lambda m: quad(integrand, -200, Muv(fishcast,z,m=m))[0]
    return n(m)
 
 

@@ -1,15 +1,17 @@
-from headers import *
-from velocileptors.LPT.cleft_fftw import CLEFT
-from bao_recon.zeldovich_rsd_recon_fftw import Zeldovich_Recon
-from velocileptors.LPT.lpt_rsd_fftw import LPT_RSD
-from scipy.signal import savgol_filter
-from castorina import castorinaBias,castorinaPn
-from twoPointNoise import *
-from scipy.integrate import simps
-from math import ceil
+from FishLSS.twoPointNoise import compute_n
+from FishLSS.castorina import castorinaBias,castorinaPn
+from FishLSS.bao_recon.zeldovich_rsd_recon_fftw import Zeldovich_Recon
+
+import numpy as np
+from scipy.interpolate import interp1d
 from scipy.interpolate import InterpolatedUnivariateSpline as Spline
 from scipy.special import legendre
+from scipy.signal import savgol_filter
+from scipy.integrate import simps
+from math import ceil
 
+from velocileptors.LPT.cleft_fftw import CLEFT
+from velocileptors.LPT.lpt_rsd_fftw import LPT_RSD
 #################################################################################################
 #################################################################################################
 # Biases for various surveys and probes.
@@ -153,7 +155,7 @@ def compute_tracer_power_spectrum(fishcast, z, b=-1., b2=-1, bs=-1,
    '''
    exp = fishcast.experiment
    if fishcast.recon: 
-      return compute_recon_power_spectrum(fishcast,z,b=b,b2=b2,bs=bs,N=N)
+      return compute_recon_power_spectrum(fishcast,z,b=b,b2=b2,bs=bs,N=N,f=f)
 
    if b == -1.: b = compute_b(fishcast,z)
    if b2 == -1 and exp.b2 is not None: b2 = exp.b2(z) 
@@ -400,7 +402,7 @@ def compute_lensing_Cell(fishcast, X, Y, zmin=None, zmax=None,zmid=None,gamma=1.
    return np.array([result(l) for l in fishcast.ell])
     
 
-def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
+def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None,f=-1):
    '''
    Returns the reconstructed power spectrum, following Stephen's paper.
    '''
@@ -410,7 +412,7 @@ def compute_recon_power_spectrum(fishcast,z,b=-1.,b2=-1.,bs=-1.,N=None):
    noise = 1/compute_n(fishcast,z)
    if fishcast.experiment.HI: noise = castorinaPn(z)
    if N is None: N = 1/compute_n(fishcast,z)
-   f = fishcast.cosmo.scale_independent_growth_factor_f(z) 
+   if f==-1: f = fishcast.cosmo.scale_independent_growth_factor_f(z) 
     
    bL1 = b-1.
    bL2 = b2-8*(b-1)/21

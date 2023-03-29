@@ -1,7 +1,7 @@
 import numpy as np
 
-from bao_recon.loginterp import loginterp
-from bao_recon.spherical_bessel_transform import SphericalBesselTransform
+from FishLSS.bao_recon.loginterp import loginterp
+from FishLSS.bao_recon.spherical_bessel_transform import SphericalBesselTransform
 
 
 

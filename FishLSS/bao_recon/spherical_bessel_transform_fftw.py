@@ -5,7 +5,7 @@ from scipy.special import loggamma
 
 import time
 
-from bao_recon.loginterp import loginterp
+from FishLSS.bao_recon.loginterp import loginterp
 
 # Class to perform spherical bessel transforms via FFTLog for a given set of qs, ie.
 # the untransformed coordinate, up to a given order L in bessel functions (j_l for l
