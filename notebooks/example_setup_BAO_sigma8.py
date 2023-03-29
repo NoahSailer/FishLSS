@@ -5,12 +5,13 @@
 # This is the "driver" used by the "BAO_sigma8" Jupyter
 # notebook.
 #
-import sys
-
 # Import revelant packages
-from headers       import *
-from twoPoint      import *
-from twoPointNoise import *
+import numpy as np
+from classy import Class
+import sys
+from scipy.interpolate import interp1d
+from FishLSS.fisherForecast import fisherForecast
+from FishLSS.experiment import experiment
 
 
 # Set the default cosmological parameters.

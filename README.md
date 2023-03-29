@@ -10,10 +10,7 @@ If you make use of this code please cite [(Sailer et al. 2021)](https://arxiv.or
 
 **Requirements:** the usual [anaconda](https://www.anaconda.com/products/distribution) stuff, [pyFFTW](https://hgomersall.github.io/pyFFTW/), [velocileptors](https://github.com/sfschen/velocileptors), and [CLASS](https://github.com/lesgourg/class_public). To forecast sensitivity to Early Dark Energy one can optionally use [CLASS_EDE](https://github.com/mwt5345/class_ede) instead of the vanilla CLASS (and similarly for any other modified version of CLASS).
 
-**Installation:** ```git clone https://github.com/NoahSailer/FishLSS``` 
-
-At the moment all code and notebooks should be run from the ```FishLSS/``` directory, sorry about that! Making the code executable from anywhere is on my todo list.
-
+**Installation:** ```pip install -v git+https://github.com/NoahSailer/FishLSS``` 
 -------
 
 **What is ``FishLSS`` good for?**
@@ -55,10 +52,13 @@ CMB fisher matrices, CMB lensing noise curves, and the assumed fiducial reioniza
 
 ```
 # import dependencies
-from headers import *
+import numpy as np
+from classy import Class
+from FishLSS.fisherForecast import fisherForecast
+from FishLSS.experiment import experiment
 
 # create CLASS object
-params = {'output': 'mPk','P_k_max_h/Mpc': 40.,'non linear':'halofit', 
+params = {'output': 'mPk lCl','P_k_max_h/Mpc': 40.,'non linear':'halofit', 
           'z_pk': '0.0,10','A_s': 2.10732e-9,'n_s': 0.96824,
           'alpha_s': 0.,'h': 0.6770, 'N_ur': 1.0196,
           'N_ncdm': 2,'m_ncdm': '0.01,0.05','tau_reio': 0.0568,
