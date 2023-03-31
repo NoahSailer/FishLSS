@@ -77,7 +77,9 @@ cosmo.compute()
 exp = experiment(zmin=2., zmax=5., nbins=3, fsky=0.34, LBG=True)
 
 # Create the forecast object. 
-fishcast = fisherForecast(experiment=exp,cosmo=cosmo,name='Example')
+bd = '/path/to/where/you/want/to/store/derivatives/'
+fishcast = fisherForecast(experiment=exp,cosmo=cosmo,name='Example',basedir=bd)
+# derivatives stored in bd + 'output/Example/'
                           
 # Specify which derivatives to compute 
 basis = np.array(['h','log(A_s)','n_s','omega_cdm','b','b_2'])

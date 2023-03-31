@@ -78,6 +78,8 @@ class fisherForecast(object):
       self.ell = ell
       self.N2cut = N2cut
       self.basedir = basedir
+      if basedir != '' and not basedir.endswith('/'):
+         self.basedir = basedir + '/'
       
       # Set up the k-mu grid 
       k = np.logspace(np.log10(self.kmin),np.log10(self.kmax),self.Nk) # [h/Mpc]
@@ -117,9 +119,9 @@ class fisherForecast(object):
       self.create_json_summary()
       
       if setup or overwrite: 
-            self.compute_fiducial_Pk(overwrite=overwrite)
-            self.compute_fiducial_Cl(overwrite=overwrite)
-            self.compute_fiducial_Precon(overwrite=overwrite)
+         self.compute_fiducial_Pk(overwrite=overwrite)
+         self.compute_fiducial_Cl(overwrite=overwrite)
+         self.compute_fiducial_Precon(overwrite=overwrite)
 
 
 

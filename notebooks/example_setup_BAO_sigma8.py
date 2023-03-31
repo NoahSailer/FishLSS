@@ -13,6 +13,8 @@ from scipy.interpolate import interp1d
 from FishLSS.fisherForecast import fisherForecast
 from FishLSS.experiment import experiment
 
+bd = '/path/to/where/you/want/to/store/derivatives/'
+
 
 # Set the default cosmological parameters.
 default_cosmo = {'A_s': 2.10732e-9,\
@@ -54,7 +56,7 @@ def make_forecast(cosmo,survey_filebase,nbins=3,fsky=0.5):
         setup = False
     # Generate the fisherForecast object with directory set by
     # the survey file basename and properties read from the text file.
-    forecast = fisherForecast(experiment=exp,cosmo=cosmo,name=sfb,setup=setup)
+    forecast = fisherForecast(experiment=exp,cosmo=cosmo,name=sfb,setup=setup,basedir=bd)
     return forecast
 
 
