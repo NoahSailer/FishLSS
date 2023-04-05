@@ -46,7 +46,7 @@ class fisherForecast(object):
                 N2cut=0.2,
                 setup=True,
                 overwrite=False,
-                basedir=''):
+                basedir='.'):
         
       # some basic stuff for the k-mu grid  
       self.kmin = kmin
