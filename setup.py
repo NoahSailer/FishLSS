@@ -14,7 +14,7 @@ setuptools.setup(
     url="https://github.com/NoahSailer/FishLSS",
     packages=['FishLSS','FishLSS/input',\
               'FishLSS/bao_recon'],
-    package_data={'FishLSS': ['*.txt','*.dat','*.md']},
+    package_data={'FishLSS': ['*.txt','*.dat','*.md'],'FishLSS/input': ['*.txt','*.dat','*.md']},
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
