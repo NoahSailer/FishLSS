@@ -282,14 +282,15 @@ def compute_real_space_cross_power(fishcast, X, Y, z, gamma=1., b=-1.,
     
     
    if X == Y and X == 'g':
-      kk,pgg = cleft.combine_bias_terms_pk(bL1,bL2,bLs,alpha0,0,N) 
+      kk,pgg = cleft.combine_bias_terms_pk(bL1,bL2,bLs,0.,alpha0,N) 
       return interp1d(kk, pgg, kind='linear', bounds_error=False, fill_value=0.) 
    
    # if neither of the above cases are true, return Pkg
    kk = cleft.pktable[:,0]
+   # 1, b1, b1**2, b2, b1*b2, b2**2, bs, b1*bs, b2*bs, bs**2, b3, b1*b3                                    
    pkg = cleft.pktable[:,1]+0.5*(bL1+bk)*cleft.pktable[:,2]+bL1*bk*cleft.pktable[:,3]+\
          0.5*bL2*cleft.pktable[:,4]+0.5*bk*bL2*cleft.pktable[:,5]+0.5*bLs*cleft.pktable[:,7]+\
-         0.5*bk*bLs*cleft.pktable[:,8]+alphax*kk**2*cleft.pktable[:,11]
+         0.5*bk*bLs*cleft.pktable[:,8]+alphax*kk**2*cleft.pktable[:,-1]
    return interp1d(kk, pkg, kind='linear', bounds_error=False, fill_value=0.) 
    
    
