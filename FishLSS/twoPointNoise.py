@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.integrate import quad
-from scipy.interpolate import interp1d
+from scipy.interpolate import interp1d, interp2d
 
 from FishLSS.castorina import castorinaBias,castorinaPn
 from FishLSS.input.reio_hist import Xhi

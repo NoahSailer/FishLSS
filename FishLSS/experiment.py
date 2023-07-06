@@ -87,7 +87,7 @@ class experiment(object):
       self.sigv = sigv
       # If the number density is not a float, assumed to be a function of z
       if not isinstance(n, float): self.cust_n = n
-      else: self.custum_n = lambda z: n + 0.*z
+      else: self.cust_n = lambda z: n + 0.*z
       # If the bias is not a float, assumed to be a function of z
       if not isinstance(b, float): self.cust_b = b
       else: self.cust_b = lambda z: b + 0.*z
