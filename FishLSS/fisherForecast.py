@@ -667,6 +667,7 @@ class fisherForecast(object):
          T = np.sqrt(pmatter/self.k**self.params['n_s']) ; T /= T[0]
          fNL_factor = 3.*1.68*(b_fid-1.)*self.cosmo.Om_m(0)*100.**2.
          fNL_factor /= D * self.k**2. * T * 299792.458**2.
+         
          result *= fNL_factor
       return result
 
@@ -698,7 +699,10 @@ class fisherForecast(object):
       kwargs = {'fishcast':self, 'X':X, 'Y':Y, 'zmin':zmin, 'zmax':zmax,
                 'zmid':zmid,'gamma':1, 'b':b_fid, 'b2':8*(b_fid-1)/21,
                 'bs':-2*(b_fid-1)/7,'alpha0':alpha0_fid,'alphax':0,'N':noise}
-                    
+          
+      fNL_flag = False
+      if param == 'f_NL': fNL_flag = True ; param = 'b'
+                
       if param in kwargs: 
          default_value = kwargs[param]
          up = default_value*(1+relative_step)
@@ -720,16 +724,26 @@ class fisherForecast(object):
             kwargs[param] = downdown
             P_dummy_lower = compute_lensing_Cell(**kwargs)
          kwargs[param] = default_value
-         if five_point: return (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. *  step) 
-         return (P_dummy_hi-P_dummy_low) / (2. * step)
+         if five_point: result = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. *  step) 
+         else:          result =  (P_dummy_hi-P_dummy_low) / (2. * step)
+         if fNL_flag:
+            D = 0.76 * self.cosmo.scale_independent_growth_factor(zmid) # normalized so D(a) = a in the MD era
+            # brute force way of getting the transfer function, normalized to 1 at kmin
+            pmatter = compute_matter_power_spectrum(self, zmid, linear=True)
+            T = np.sqrt(pmatter/self.k**self.params['n_s']) ; T /= T[0]
+            fNL_factor = 3.*1.68*(b_fid-1.)*self.cosmo.Om_m(0)*100.**2.
+            fNL_factor /= D * self.k**2. * T * 299792.458**2.
+            fNL_interp = self.get_f_at_fixed_mu(fNL_factor,0.)
+            chi = (1+zmid)*self.cosmo.angular_distance(zmid)*self.params_fid['h']
+            fNL_ell = fNL_interp((self.ell+0.5)/chi)
+            result *= fNL_ell
+         return result
     
       P_fid = compute_lensing_Cell(**kwargs)
               
       # brute force numerical differentiation
       flag = False 
-      if param == 'log(A_s)': 
-         flag = True
-         param = 'A_s'  
+      if param == 'log(A_s)': flag = True ; param = 'A_s'  
         
       default_value = self.params_fid[param] 
         
@@ -777,6 +791,7 @@ class fisherForecast(object):
       if five_point: result = (-P_dummy_higher + 8.*P_dummy_hi - 8.*P_dummy_low + P_dummy_lower) / (12. * step)
       else: result = (P_dummy_hi-P_dummy_low)/(2.*step)
       if flag: result *= self.params['A_s']
+      
       return result
 
        
