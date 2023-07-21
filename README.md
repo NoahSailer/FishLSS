@@ -42,13 +42,13 @@ With the exception of the CMB lensing convergence power spectrum, which is model
 
 - any standard ```CLASS``` input, or any extra parameters introduced by a modified version of ```CLASS``` (e.g. the maximum amplitude of Early Dark Energy when running ```CLASS_EDE```)
 
-- bias parameters, counterterms and stochastic contributions
+- bias parameters (```b, b1, b2```), counterterms (```alpha0, alpha2, alpha4```) and stochastic contributions (```N, N2, N4```)
 
-- the fixed-template BAO parameters 
+- the fixed-template BAO parameters (```alpha_parallel, alpha_perp```)
 
-- (linear) primordial features 
+- (linear) primordial features (```A_lin, A_log```)
 
-- local primordial non-Gaussianity through its effect on scale dependent bias
+- local primordial non-Gaussianity through its effect on scale dependent bias (```f_NL```)
 
 -------
 
