@@ -295,7 +295,7 @@ class fisherForecast(object):
               'fsky': self.experiment.fsky,
               'CLASS default parameters': self.params_fid}
 
-      with open('output/'+self.name+'/'+'summary.json', 'w') as write_file:
+      with open(self.basedir+'output/'+self.name+'/'+'summary.json', 'w') as write_file:
          json.dump(data, write_file, indent=2)
   
 
