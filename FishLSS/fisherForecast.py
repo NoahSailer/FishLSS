@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.special import legendre
-from scipy.integrate import simps
+from scipy.integrate import simpson as simps
 from scipy.interpolate import interp1d
 import os, json
 from os.path import exists
