@@ -7,7 +7,7 @@ from scipy.interpolate import interp1d
 from scipy.interpolate import InterpolatedUnivariateSpline as Spline
 from scipy.special import legendre
 from scipy.signal import savgol_filter
-from scipy.integrate import simps
+from scipy.integrate import simpson as simps
 from math import ceil
 
 from velocileptors.LPT.cleft_fftw import CLEFT
