@@ -42,7 +42,7 @@ class fisherForecast(object):
                 name='toy_model',
                 smooth=False,
                 AP=True,
-                ell=np.arange(10,1000,1),
+                ell=np.arange(10,2000,1), # Haruki likes 2000 
                 N2cut=0.2,
                 setup=True,
                 overwrite=False,
